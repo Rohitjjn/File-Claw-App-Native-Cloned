@@ -45,7 +45,6 @@ dependencies:
   csv: ^6.0.0
 
   # Notifications
-  flutter_local_notifications: ^17.2.3
 
   # Navigation
   go_router: ^14.2.7
@@ -58,6 +57,7 @@ dependencies:
   equatable: ^2.0.5
   logger: ^2.4.0
   quick_actions: ^1.1.0
+  app_links: ^7.0.0
 
 dev_dependencies:
   flutter_test:

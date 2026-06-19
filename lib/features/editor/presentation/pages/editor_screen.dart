@@ -15,9 +15,7 @@ import '../../../../models/editor_state.dart';
 import '../../../../models/file_item.dart';
 import '../../../../models/file_type.dart';
 import '../../../../services/file_reader_service.dart';
-import '../../../../services/notification_service.dart';
 import '../../../history/presentation/providers/history_provider.dart';
-import '../../../notifications/presentation/providers/notification_provider.dart';
 import '../../../settings/presentation/providers/settings_provider.dart';
 import '../providers/editor_provider.dart';
 import '../widgets/markdown_text_controller.dart';
@@ -47,9 +45,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     if (widget.file.type == FileType.markdown) { _textController = MarkdownTextController(); } else { _textController = TextEditingController(); }
     _scrollController = ScrollController();
     _bootstrap();
-    Future.microtask(() {
-      AppNotificationService.instance.showFileOngoingNotification(widget.file.name);
-    });
   }
 
   Future<void> _bootstrap() async {
@@ -85,7 +80,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
 
   @override
   void dispose() {
-    AppNotificationService.instance.cancelFileOngoingNotification(widget.file.name);
     _autosaveTimer?.cancel();
     _textController.dispose();
     _scrollController.dispose();
@@ -119,12 +113,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Saved')),
       );
-      final cfg = ref.read(settingsProvider);
-      if (cfg.notificationOnSave) {
-        ref
-            .read(notificationServiceProvider)
-            .showFileSaveNotification(widget.file.name);
-      }
+
+
       HapticFeedback.lightImpact();
     } catch (_) {
       if (!mounted) return;

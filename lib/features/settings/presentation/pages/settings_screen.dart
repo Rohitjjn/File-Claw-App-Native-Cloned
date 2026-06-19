@@ -45,7 +45,6 @@ class SettingsScreen extends ConsumerWidget {
                       children: [
                         _RadioRow<AppThemeMode>(
                           title: 'Light',
-                          subtitle: 'Default Claude aesthetic',
                           value: AppThemeMode.light,
                           group: cfg.themeMode,
                           onChanged: notifier.setThemeMode,
@@ -53,7 +52,6 @@ class SettingsScreen extends ConsumerWidget {
                         const _Divider(),
                         _RadioRow<AppThemeMode>(
                           title: 'Dark',
-                          subtitle: 'Easy on the eyes',
                           value: AppThemeMode.dark,
                           group: cfg.themeMode,
                           onChanged: notifier.setThemeMode,
@@ -61,7 +59,6 @@ class SettingsScreen extends ConsumerWidget {
                         const _Divider(),
                         _RadioRow<AppThemeMode>(
                           title: 'System',
-                          subtitle: 'Follow device theme',
                           value: AppThemeMode.system,
                           group: cfg.themeMode,
                           onChanged: notifier.setThemeMode,
@@ -111,7 +108,6 @@ class SettingsScreen extends ConsumerWidget {
                         const _Divider(),
                         _SwitchRow(
                           title: 'Auto-save Drafts',
-                          subtitle: 'Restore unsaved edits later',
                           value: cfg.autoSaveDrafts,
                           onChanged: notifier.setAutoSaveDrafts,
                         ),
@@ -252,33 +248,6 @@ class SettingsScreen extends ConsumerWidget {
                     ),
                   ),
 
-                  // ─── Notifications ──────────────────────────────
-                  const SectionHeader(label: 'Notifications', padding: EdgeInsets.fromLTRB(4, 24, 4, 8)),
-                  ClaudeCard(
-                    padding: EdgeInsets.zero,
-                    child: Column(
-                      children: [
-                        _SwitchRow(
-                          title: 'File Open Complete',
-                          value: cfg.notificationOnOpen,
-                          onChanged: notifier.setNotificationOnOpen,
-                        ),
-                        const _Divider(),
-                        _SwitchRow(
-                          title: 'Save Complete',
-                          value: cfg.notificationOnSave,
-                          onChanged: notifier.setNotificationOnSave,
-                        ),
-                        const _Divider(),
-                        _SwitchRow(
-                          title: 'Low Storage Warning',
-                          value: cfg.notificationLowStorage,
-                          onChanged: notifier.setNotificationLowStorage,
-                        ),
-                      ],
-                    ),
-                  ),
-
                   // ─── About ──────────────────────────────────────
                   const SectionHeader(label: 'About', padding: EdgeInsets.fromLTRB(4, 24, 4, 8)),
                   ClaudeCard(
@@ -325,14 +294,12 @@ class _Divider extends StatelessWidget {
 
 class _RadioRow<T> extends StatelessWidget {
   final String title;
-  final String? subtitle;
   final T value;
   final T group;
   final ValueChanged<T> onChanged;
 
   const _RadioRow({
     required this.title,
-    this.subtitle,
     required this.value,
     required this.group,
     required this.onChanged,
@@ -341,9 +308,7 @@ class _RadioRow<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final secondary = isDark
-        ? ClaudeColors.darkTextSecondary
-        : ClaudeColors.lightTextSecondary;
+    final secondary = isDark ? ClaudeColors.darkTextSecondary : ClaudeColors.lightTextSecondary;
     final selected = value == group;
     return InkWell(
       onTap: () => onChanged(value),
@@ -364,11 +329,7 @@ class _RadioRow<T> extends StatelessWidget {
                 children: [
                   Text(title,
                       style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 2),
-                    Text(subtitle!,
-                        style: TextStyle(fontSize: 12.5, color: secondary)),
-                  ],
+
                 ],
               ),
             ),
@@ -381,23 +342,17 @@ class _RadioRow<T> extends StatelessWidget {
 
 class _SwitchRow extends StatelessWidget {
   final String title;
-  final String? subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
 
   const _SwitchRow({
     required this.title,
-    this.subtitle,
     required this.value,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final secondary = isDark
-        ? ClaudeColors.darkTextSecondary
-        : ClaudeColors.lightTextSecondary;
     return InkWell(
       onTap: () => onChanged(!value),
       child: Padding(
@@ -410,11 +365,7 @@ class _SwitchRow extends StatelessWidget {
                 children: [
                   Text(title,
                       style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 2),
-                    Text(subtitle!,
-                        style: TextStyle(fontSize: 12.5, color: secondary)),
-                  ],
+
                 ],
               ),
             ),
@@ -426,62 +377,6 @@ class _SwitchRow extends StatelessWidget {
   }
 }
 
-class _SliderRow extends StatelessWidget {
-  final String title;
-  final double value;
-  final double min;
-  final double max;
-  final int divisions;
-  final ValueChanged<double> onChanged;
-
-  const _SliderRow({
-    required this.title,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.divisions,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(title,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-              ),
-              Text('${(value * 100).toInt()}%',
-                  style: const TextStyle(fontSize: 13, color: ClaudeColors.primary)),
-            ],
-          ),
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              activeTrackColor: ClaudeColors.primary,
-              inactiveTrackColor:
-                  ClaudeColors.primary.withValues(alpha: 0.2),
-              thumbColor: ClaudeColors.primary,
-              overlayColor: ClaudeColors.primary.withValues(alpha: 0.15),
-              trackHeight: 3,
-            ),
-            child: Slider(
-              value: value,
-              min: min,
-              max: max,
-              divisions: divisions,
-              onChanged: onChanged,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _Seg<T> {
   final T value;
@@ -590,14 +485,12 @@ class _ChoiceChip extends StatelessWidget {
 class _ActionRow extends StatelessWidget {
   final IconData icon;
   final String title;
-  final String? subtitle;
   final bool destructive;
   final VoidCallback onTap;
 
   const _ActionRow({
     required this.icon,
     required this.title,
-    this.subtitle,
     this.destructive = false,
     required this.onTap,
   });
@@ -627,11 +520,7 @@ class _ActionRow extends StatelessWidget {
                         fontWeight: FontWeight.w500,
                         color: colour,
                       )),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 2),
-                    Text(subtitle!,
-                        style: TextStyle(fontSize: 12.5, color: secondary)),
-                  ],
+
                 ],
               ),
             ),

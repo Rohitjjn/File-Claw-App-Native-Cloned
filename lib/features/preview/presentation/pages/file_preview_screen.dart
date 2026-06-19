@@ -17,7 +17,6 @@ import '../../../../models/file_type.dart';
 import '../../../../core/utils/file_type_detector.dart';
 import '../providers/preview_provider.dart';
 import '../widgets/archive_tree_view.dart';
-import '../../../../services/notification_service.dart';
 import '../widgets/code_preview.dart';
 import '../widgets/hex_preview.dart';
 import '../widgets/image_preview.dart';
@@ -25,7 +24,6 @@ import '../widgets/markdown_preview.dart';
 import '../widgets/text_preview.dart';
 import '../../../settings/presentation/providers/settings_provider.dart';
 import '../../../history/presentation/providers/history_provider.dart';
-import '../../../notifications/presentation/providers/notification_provider.dart';
 
 /// Renders the appropriate preview widget for the supplied [FileItem],
 /// switches into editor mode, or surfaces friendly error states.
@@ -46,11 +44,8 @@ class _FilePreviewScreenState extends ConsumerState<FilePreviewScreen> {
   void initState() {
     super.initState();
     Future.microtask(() async {
-      final config = ref.read(settingsProvider);
-      if (config.notificationOnOpen) {
-        AppNotificationService.instance.showFileOpenNotification(widget.file.name);
-      }
-      AppNotificationService.instance.showFileOngoingNotification(widget.file.name);
+
+
     });
 
     _scroll.addListener(() {
@@ -61,7 +56,6 @@ class _FilePreviewScreenState extends ConsumerState<FilePreviewScreen> {
 
   @override
   void dispose() {
-    AppNotificationService.instance.cancelFileOngoingNotification(widget.file.name);
     _scroll.dispose();
     super.dispose();
   }
@@ -69,12 +63,8 @@ class _FilePreviewScreenState extends ConsumerState<FilePreviewScreen> {
   void _maybeNotifyOpened(FileItem file) {
     if (_notified) return;
     _notified = true;
-    final cfg = ref.read(settingsProvider);
-    if (cfg.notificationOnOpen) {
-      ref
-          .read(notificationServiceProvider)
-          .showFileOpenNotification(file.name);
-    }
+
+
   }
 
   Future<void> _share() async {

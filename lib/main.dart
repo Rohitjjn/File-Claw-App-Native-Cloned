@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:quick_actions/quick_actions.dart';
 
+import 'services/intent_handler_service.dart';
+
 import 'core/constants/app_constants.dart';
 import 'core/themes/app_theme.dart';
 import 'features/about/about_screen.dart';
@@ -16,7 +18,6 @@ import 'features/splash/splash_screen.dart';
 import 'models/file_item.dart';
 import 'services/config_repository.dart';
 import 'services/editor_cache_repository.dart';
-import 'services/notification_service.dart';
 import 'services/history_repository.dart';
 
 // Global key to control navigation from quick actions
@@ -32,18 +33,10 @@ Future<void> main() async {
 
   // Init notifications & prune stale caches in the background.
   // ignore: discarded_futures
-  AppNotificationService.instance.init();
   // ignore: discarded_futures
   EditorCacheRepository.instance.pruneStale();
 
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
-      statusBarBrightness: Brightness.light,
-      systemNavigationBarColor: Colors.transparent,
-    ),
-  );
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   runApp(const ProviderScope(child: FilesClawApp()));
 }
@@ -62,6 +55,13 @@ class _FilesClawAppState extends ConsumerState<FilesClawApp> {
   void initState() {
     super.initState();
     _setupQuickActions();
+    IntentHandlerService.instance.init();
+  }
+
+  @override
+  void dispose() {
+    IntentHandlerService.instance.dispose();
+    super.dispose();
   }
 
   void _setupQuickActions() {
@@ -107,6 +107,19 @@ class _FilesClawAppState extends ConsumerState<FilesClawApp> {
       darkTheme: AppTheme.dark(),
       onGenerateRoute: _onGenerateRoute,
       initialRoute: '/',
+      builder: (context, child) {
+        final brightness = Theme.of(context).brightness;
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness: brightness == Brightness.light ? Brightness.dark : Brightness.light,
+            statusBarBrightness: brightness,
+            systemNavigationBarColor: Colors.transparent,
+            systemNavigationBarIconBrightness: brightness == Brightness.light ? Brightness.dark : Brightness.light,
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
     );
   }
 

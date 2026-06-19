@@ -10,11 +10,8 @@ import '../../../../core/widgets/claude_list_tile.dart';
 import '../../../../core/widgets/empty_state.dart';
 import '../../../../core/widgets/file_icon.dart';
 import '../../../../core/widgets/section_header.dart';
-import '../../../../models/app_config.dart';
 import '../../../../models/file_item.dart';
-import '../../../../models/file_type.dart';
 import '../../../history/presentation/providers/history_provider.dart';
-import '../../../settings/presentation/providers/settings_provider.dart';
 
 /// Claude-style left navigation drawer: header, history list, bottom anchored
 /// settings/theme/about rows.
@@ -39,7 +36,6 @@ class SidebarDrawer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final history = ref.watch(historyProvider);
-    final cfg = ref.watch(settingsProvider);
     final width = MediaQuery.of(context).size.width * 0.85;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final divider = isDark ? ClaudeColors.darkDivider : ClaudeColors.lightDivider;
