@@ -1901,7 +1901,12 @@ fun CodePreview(
     scrollToLine: Int? = null,
     onScrollToLineHandled: () -> Unit = {},
     appearanceTheme: String = "Claude Glass",
-    appearanceFontSize: Int? = null
+    appearanceFontSize: Int? = null,
+    searchQuery: String = "",
+    searchNavigationToken: Int = 0,
+    searchNavigationForward: Boolean = true,
+    printRequested: Boolean = false,
+    onPrintHandled: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -2080,6 +2085,27 @@ fun CodePreview(
             }
 
             var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
+
+            var lastSearchNavigationToken by remember { mutableStateOf(searchNavigationToken) }
+
+            LaunchedEffect(searchQuery, webViewRef) {
+                val webView = webViewRef ?: return@LaunchedEffect
+                if (searchQuery.isBlank()) webView.clearMatches() else webView.findAllAsync(searchQuery)
+            }
+            LaunchedEffect(searchNavigationToken, searchQuery, webViewRef) {
+                val webView = webViewRef ?: return@LaunchedEffect
+                if (searchQuery.isNotBlank() && searchNavigationToken != lastSearchNavigationToken) {
+                    webView.findNext(searchNavigationForward)
+                }
+                lastSearchNavigationToken = searchNavigationToken
+            }
+            LaunchedEffect(printRequested, webViewRef) {
+                val webView = webViewRef
+                if (printRequested && webView != null) {
+                    com.example.utils.FilePrintHelper.printWebView(context, webView, fileEntity.name)
+                    onPrintHandled()
+                }
+            }
 
             LaunchedEffect(scrollToLine) {
                 if (scrollToLine != null) {
