@@ -1470,11 +1470,11 @@ fun MarkdownPreview(
     markdownText: String,
     fileEntity: RecentFileEntity,
     fontSizeSetting: String,
+    modifier: Modifier = Modifier,
     appearanceTheme: String = "Claude Glass",
     appearanceFontSize: Int? = null,
     scrollToHeadingIndex: Int? = null,
-    onOutlineJumpHandled: () -> Unit = {},
-    modifier: Modifier = Modifier
+    onOutlineJumpHandled: () -> Unit = {}
 ) {
     val isNightMode = androidx.compose.foundation.isSystemInDarkTheme()
     var generatedHtml by remember(markdownText, isNightMode, fontSizeSetting, appearanceTheme, appearanceFontSize) { mutableStateOf<String?>(null) }
@@ -1844,13 +1844,13 @@ fun CodePreview(
     codeText: String,
     fileEntity: RecentFileEntity,
     fontSizeSetting: String,
-    appearanceTheme: String = "Claude Glass",
-    appearanceFontSize: Int? = null,
     wrapSetting: Boolean,
     showLineNumbers: Boolean,
     modifier: Modifier = Modifier,
     scrollToLine: Int? = null,
-    onScrollToLineHandled: () -> Unit = {}
+    onScrollToLineHandled: () -> Unit = {},
+    appearanceTheme: String = "Claude Glass",
+    appearanceFontSize: Int? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
