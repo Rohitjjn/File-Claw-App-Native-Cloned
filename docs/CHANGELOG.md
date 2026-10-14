@@ -4,6 +4,20 @@ Format: [Keep a Changelog](https://keepachangelog.com). Numbers marked **(measur
 run in the build sandbox; **(not verified)** means the change could not be compiled or run there (no Android SDK,
 no Maven access). See `TODO.md` → KNOWN ISSUES.
 
+## [1.5.0] "Immersive Reader, Appearance Controls & Document Outline": versionCode 7
+
+### Added
+- **Immersive Focus Mode** for PDF, image, Markdown and code/text views: viewer chrome and Android system bars hide together, with a subtle floating Back control and exit-focus hint.
+- **Reader Appearance Picker**: Claude Glass, Nord Dark and Warm Parchment palettes, with persistent font-size settings in the 11–22 sp range for Markdown and code/text previews.
+- **Markdown Outline / TOC** with jumpable Markdown headings and fenced-code exclusion.
+- **DOCX styled-heading outline** from OOXML Heading 1–6, Title and Subtitle styles; PDF outline uses page-jump fallback when the viewer does not surface PDF bookmarks.
+- **DOCX zoom-out below 1×**: the preview viewport allows scaling down to 25% for seeing the complete document page.
+- **Collision-safe Save As**: exports select a new filename rather than silently replacing the source or an existing sibling copy; the existing atomic save/export and recent-file indexing path is retained.
+
+### Verification status
+- Added pure-Kotlin Markdown outline tests and DOCX styled-heading extraction assertions.
+- **Build not verified in this editing environment**: Gradle commands were not run because a local checkout could not be established (GitHub clone failed with DNS resolution error). Run the Quality Gate in BUILD_GUIDE.md before merge.
+
 ## [1.4.0] "DOCX Engine Fix, Glass Properties Sheet & PDF Resume": versionCode 6
 
 ### Fixed

@@ -13,7 +13,8 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`. No keystore needed: without `d
 ## Quality Gate (run this first on a new machine; cycle 1 could not run it)
 ```
 ./gradlew build                        # compile + all checks
-./gradlew testDebugUnitTest            # 91 JUnit tests (core/)
+./gradlew :app:testDebugUnitTest       # app debug unit-test task
+./gradlew testDebugUnitTest            # compatibility alias if configured
 ./gradlew jacocoCoreVerify             # fails below 80 % line coverage of com.example.core
 ./gradlew lintDebug detekt             # lint must have 0 errors; detekt is advisory for now
 ./gradlew assembleDebug

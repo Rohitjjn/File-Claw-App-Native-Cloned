@@ -815,7 +815,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "$trimmedName.${originalEntity.extension}"
                 }
 
-                val targetFile = File(parentDir, targetName)
+                val extensionSuffix = targetName.substringAfterLast('.', "").let { if (it.isBlank()) "" else ".$it" }
+                val fileStem = if (extensionSuffix.isEmpty()) targetName else targetName.removeSuffix(extensionSuffix)
+                var targetFile = File(parentDir, targetName)
+                var collisionNumber = 2
+                // Save As creates a distinct copy and never replaces the original or an existing export.
+                while (targetFile.absoluteFile == originalFile.absoluteFile || targetFile.exists()) {
+                    val suffix = if (collisionNumber == 2) " (copy)" else " (copy $collisionNumber)"
+                    targetFile = File(parentDir, "$fileStem$suffix$extensionSuffix")
+                    collisionNumber++
+                }
                 val bytes = content.toByteArray(Charsets.UTF_8)
 
                 // Atomic crash-safe write

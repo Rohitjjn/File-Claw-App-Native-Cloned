@@ -3,12 +3,7 @@
 Priorities: **P0** data loss / crash / security · **P1** high-impact feature or correctness · **P2** quality · **P3** polish.
 
 ## KNOWN ISSUES (read first)
-1. **Nothing in the Android layer has been compiled or run by the author of this patch.** The sandbox had no Android SDK and
-   no access to Maven/Google repositories, so `./gradlew build`, `test`, `lint`, `detekt`, `assembleDebug` were **not run**.
-   What *was* verified: the entire `core/` package compiles under Kotlin 1.9.22 and passes 91 tests with 98.3 % line coverage
-   (via a stand-in JUnit runner, not Gradle); every changed Kotlin file passes a parse check. Type-level errors in
-   `FileManager`, `MainViewModel`, `MainActivity`, `FilePreviewScreen`, `UniversalViewers`, `CacheManager` (library and
-   Compose API usage) are possible. **Run the Quality Gate in `BUILD_GUIDE.md` first.**
+1. **Loop 6 verification is pending.** The GitHub-connected editing environment could not establish a local checkout (network DNS resolution failed), so Compose/JavaScript changes and unit tests have not been run through Gradle. Run `./gradlew :app:testDebugUnitTest`, `./gradlew compile_applet` if supplied by the build harness, and `./gradlew assembleDebug` before merge. Do not interpret the feature checklist below as a passing build report.
 2. Gradle wiring for JaCoCo (`jacocoCoreReport` / `jacocoCoreVerify`), `enableUnitTestCoverage`, detekt, and Room schema export is
    unverified. detekt is `ignoreFailures = true` until its first green run.
 3. Edits to files opened from another app are saved to the in-app copy only (the user is told). Write-back is P1 below.
@@ -39,6 +34,12 @@ Priorities: **P0** data loss / crash / security · **P1** high-impact feature or
 - [x] **PDF Last-Read Page Bookmark & Auto-Resume (Loop 5)**: Automatically saves and restores page bookmarks in `SharedPreferences` with confirmation notification.
 - [x] **Native Print & PDF Export (Loop 5)**: Integrated Android's native `PrintManager` and `PrintDocumentAdapter` in `FilePrintHelper.kt` for Text, Markdown, Image, and Code files.
 - [x] **Quick "Go to Line" in Text & Code Viewer (Loop 5)**: Direct line navigation dialog with smooth scroll and temporary line highlight flash.
+- [x] **Loop 6 — Immersive Focus Mode**: Hide Android system bars alongside reader chrome and provide floating Back/exit-focus affordances.
+- [x] **Loop 6 — Appearance Picker**: Persist Claude Glass, Nord Dark, Warm Parchment and 11–22 sp font-size preference for Markdown/code/text.
+- [x] **Loop 6 — Outline / TOC**: Parse Markdown headings outside fences, extract styled DOCX headings, and offer PDF page-outline fallback.
+- [x] **Loop 6 — Atomic Export Copy**: Use the existing atomic write/index refresh path and select a new filename on collisions.
+- [x] **Loop 6 — DOCX zoom out**: Allow preview zoom down to 0.25×.
+- [ ] **Loop 6 Quality Gate**: Run :app:testDebugUnitTest, compile_applet when available, and assembleDebug on an Android-capable runner; not executed in this environment.
 
 ## P1
 - [ ] **Write-back to source URI** for files opened from other apps (store `sourceUri` on `RecentFileEntity`, Room `Migration(3,4)`, `openOutputStream(uri, "wt")`).
