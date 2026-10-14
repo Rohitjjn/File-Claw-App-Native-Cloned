@@ -1470,13 +1470,28 @@ fun MarkdownPreview(
     markdownText: String,
     fileEntity: RecentFileEntity,
     fontSizeSetting: String,
+    appearanceTheme: String = "Claude Glass",
+    appearanceFontSize: Int? = null,
+    scrollToHeadingIndex: Int? = null,
+    onOutlineJumpHandled: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isNightMode = androidx.compose.foundation.isSystemInDarkTheme()
-    var generatedHtml by remember(markdownText, isNightMode, fontSizeSetting) { mutableStateOf<String?>(null) }
-    var isWebViewLoading by remember(markdownText) { mutableStateOf(true) }
+    var generatedHtml by remember(markdownText, isNightMode, fontSizeSetting, appearanceTheme, appearanceFontSize) { mutableStateOf<String?>(null) }
+    var isWebViewLoading by remember(markdownText, appearanceTheme, appearanceFontSize) { mutableStateOf(true) }
+    var markdownWebViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
 
-    LaunchedEffect(markdownText, isNightMode, fontSizeSetting) {
+    LaunchedEffect(scrollToHeadingIndex, markdownWebViewRef) {
+        if (scrollToHeadingIndex != null && markdownWebViewRef != null) {
+            markdownWebViewRef?.evaluateJavascript(
+                "if (typeof window.scrollToOutline === 'function') { window.scrollToOutline($scrollToHeadingIndex); }",
+                null
+            )
+            onOutlineJumpHandled()
+        }
+    }
+
+    LaunchedEffect(markdownText, isNightMode, fontSizeSetting, appearanceTheme, appearanceFontSize) {
         val htmlContent = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             val parser = org.intellij.markdown.parser.MarkdownParser(org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor())
             val parsedTree = parser.buildMarkdownTreeFromString(markdownText)
@@ -1484,32 +1499,41 @@ fun MarkdownPreview(
                 org.intellij.markdown.html.HtmlGenerator(markdownText, parsedTree, org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor()).generateHtml(),
                 keepImages = true
             )
-
-            val fontSize = when (fontSizeSetting) {
-                "Small" -> "14px"
-                "Large" -> "20px"
-                else -> "16px"
+            var headingOrdinal = 0
+            val outlinedHtml = rawHtml.replace(Regex("<h([1-6])([^>]*)>")) { match ->
+                val ordinal = headingOrdinal++
+                val attrs = match.groupValues[2]
+                if (Regex("\\bid\\s*=").containsMatchIn(attrs)) match.value
+                else "<h" + match.groupValues[1] + attrs + " id=\"md-heading-" + ordinal + "\">"
             }
 
+            val fontSize = (appearanceFontSize ?: when (fontSizeSetting) {
+                "Small" -> 14
+                "Large" -> 20
+                else -> 16
+            }).coerceIn(11, 22).toString() + "px"
+            val nord = appearanceTheme == "Nord Dark"
+            val parchment = appearanceTheme == "Warm Parchment"
+
             // Claude Theme Colors (EXACT from File Claw - MD Preview Theme Fix Prompt)
-            val bgColor = if (isNightMode) "#151514" else "#faf9f5" // canvas
-            val textPrimary = if (isNightMode) "#f5f5f3" else "#141413" // ink
-            val textBody = if (isNightMode) "#d1cfc7" else "#3d3d3a" // body
-            val textBodyStrong = if (isNightMode) "#faf9f5" else "#252523" // body_strong
-            val textSecondary = if (isNightMode) "#a39f93" else "#6c6a64" // muted
-            val textSecondarySoft = if (isNightMode) "#8e8779" else "#8e8b82" // muted_soft
-            val accent = if (isNightMode) "#e08567" else "#cc785c" // primary (coral)
-            val accentActive = if (isNightMode) "#f09a7d" else "#a9583e" // primary_active
-            val border = if (isNightMode) "#2d2b28" else "#e6dfd8" // hairline
-            val borderSoft = if (isNightMode) "#211f1d" else "#ebe6df" // hairline_soft
-            val cardBg = if (isNightMode) "#2a2723" else "#efe9de" // surface_card
-            val quoteBg = if (isNightMode) "#1c1a18" else "#f5f0e8" // surface_soft
-            val inlineCodeBg = if (isNightMode) "#2d2823" else "#e8e0d2" // surface_cream_strong
-            val codeBlockOuterBg = if (isNightMode) "#0d0d0c" else "#181715" // surface_dark
-            val codeBlockInnerBg = if (isNightMode) "#161513" else "#1f1e1b" // surface_dark_soft
-            val codeBlockHeaderBg = if (isNightMode) "#1d1b19" else "#252320" // surface_dark_elevated
-            val codeBlockText = if (isNightMode) "#f5f5f3" else "#faf9f5" // on_dark
-            val codeBlockButtons = if (isNightMode) "#a09d96" else "#8e8b82" // on_dark_soft
+            val bgColor = when { nord -> "#2e3440"; parchment -> "#f4ecd8"; isNightMode -> "#151514"; else -> "#faf9f5" } // canvas
+            val textPrimary = when { nord -> "#eceff4"; parchment -> "#29261f"; isNightMode -> "#f5f5f3"; else -> "#141413" } // ink
+            val textBody = when { nord -> "#d8dee9"; parchment -> "#40392f"; isNightMode -> "#d1cfc7"; else -> "#3d3d3a" } // body
+            val textBodyStrong = when { nord -> "#eceff4"; parchment -> "#332d24"; isNightMode -> "#faf9f5"; else -> "#252523" } // body_strong
+            val textSecondary = when { nord -> "#aab4c5"; parchment -> "#756b5b"; isNightMode -> "#a39f93"; else -> "#6c6a64" } // muted
+            val textSecondarySoft = when { nord -> "#9aa7bd"; parchment -> "#8a7c66"; isNightMode -> "#8e8779"; else -> "#8e8b82" } // muted_soft
+            val accent = when { nord -> "#88c0d0"; parchment -> "#a85f3e"; isNightMode -> "#e08567"; else -> "#cc785c" } // primary (coral)
+            val accentActive = when { nord -> "#8fbcbb"; parchment -> "#8e4e32"; isNightMode -> "#f09a7d"; else -> "#a9583e" } // primary_active
+            val border = when { nord -> "#434c5e"; parchment -> "#d8ccb2"; isNightMode -> "#2d2b28"; else -> "#e6dfd8" } // hairline
+            val borderSoft = when { nord -> "#3b4252"; parchment -> "#e7dcc5"; isNightMode -> "#211f1d"; else -> "#ebe6df" } // hairline_soft
+            val cardBg = when { nord -> "#3b4252"; parchment -> "#eadfc7"; isNightMode -> "#2a2723"; else -> "#efe9de" } // surface_card
+            val quoteBg = when { nord -> "#343c4d"; parchment -> "#ede2cb"; isNightMode -> "#1c1a18"; else -> "#f5f0e8" } // surface_soft
+            val inlineCodeBg = when { nord -> "#434c5e"; parchment -> "#e6d8b9"; isNightMode -> "#2d2823"; else -> "#e8e0d2" } // surface_cream_strong
+            val codeBlockOuterBg = when { nord -> "#242933"; parchment -> "#292722"; isNightMode -> "#0d0d0c"; else -> "#181715" } // surface_dark
+            val codeBlockInnerBg = when { nord -> "#2e3440"; parchment -> "#34302a"; isNightMode -> "#161513"; else -> "#1f1e1b" } // surface_dark_soft
+            val codeBlockHeaderBg = when { nord -> "#3b4252"; parchment -> "#413a30"; isNightMode -> "#1d1b19"; else -> "#252320" } // surface_dark_elevated
+            val codeBlockText = when { nord -> "#eceff4"; parchment -> "#f4ecd8"; isNightMode -> "#f5f5f3"; else -> "#faf9f5" } // on_dark
+            val codeBlockButtons = when { nord -> "#aab4c5"; parchment -> "#c7bba2"; isNightMode -> "#a09d96"; else -> "#8e8b82" } // on_dark_soft
 
             """
             <!DOCTYPE html>
@@ -1679,6 +1703,10 @@ fun MarkdownPreview(
                     }
                 </style>
                 <script>
+                    window.scrollToOutline = function(index) {
+                        var target = document.getElementById('md-heading-' + index);
+                        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    };
                     function copyCode(btn, codeId) {
                         var codeText = document.getElementById(codeId).innerText;
                         if(window.Android) {
@@ -1736,7 +1764,7 @@ fun MarkdownPreview(
                 </script>
             </head>
             <body>
-                $rawHtml
+                $outlinedHtml
             </body>
             </html>
             """.trimIndent()
