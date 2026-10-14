@@ -1804,7 +1804,11 @@ fun MarkdownPreview(
                     }
                 },
                 update = { webView ->
-                    // No-op
+                    markdownWebViewRef = webView
+                    if (webView.tag != generatedHtml) {
+                        webView.tag = generatedHtml
+                        webView.loadDataWithBaseURL(null, generatedHtml!!, "text/html", "UTF-8", null)
+                    }
                 },
                 modifier = Modifier.fillMaxSize()
             )

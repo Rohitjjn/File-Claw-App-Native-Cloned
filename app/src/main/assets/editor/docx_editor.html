@@ -79,6 +79,16 @@
     </div>
 
     <script>
+        window.scrollToHeading = function(index) {
+            var output = document.getElementById('output');
+            if (!output) return;
+            var headings = output.querySelectorAll('h1, h2, h3, h4, h5, h6, [class*="Heading"], [class*="heading"]');
+            var target = headings[index];
+            if (target && typeof target.scrollIntoView === 'function') {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        };
+
         function loadDocx(base64, isDark) {
             if (isDark) {
                 document.body.classList.add('dark');
