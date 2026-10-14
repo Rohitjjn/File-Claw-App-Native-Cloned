@@ -79,7 +79,7 @@ class PdfTextSearcherTest {
 
     @Test
     fun normalizesWhitespaceInFallbackScanAndKeepsSearchCaseInsensitive() {
-        val rawPdf = "%PDF-1.4 trailer /Subject (Quarterly\\n\tFinancial   REVIEW) %%EOF".toByteArray()
+        val rawPdf = "%PDF-1.4 trailer /Subject (Quarterly\n\tFinancial   REVIEW) %%EOF".toByteArray()
         val results = PdfTextSearcher.searchInBytes(rawPdf, "QUARTERLY financial review")
         assertEquals(1, results.size)
         assertTrue(results.single().matchedText.contains("quarterly financial review"))

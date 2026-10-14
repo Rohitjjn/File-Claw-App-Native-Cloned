@@ -7,6 +7,12 @@ no Maven access). See `TODO.md` → KNOWN ISSUES.
 ## [1.5.0] "Immersive Reader, Appearance Controls & Document Outline": versionCode 7
 
 ### Added
+### Loop 7 — Reliability and search hardening
+- PDF search now normalizes query and extracted strings with locale-stable case folding and whitespace collapsing, rejects non-positive result limits, and retains FlateDecode support.
+- Save As filename selection is centralized, protects the source file, avoids replacing existing exports, and rejects path-bearing filenames.
+- Atomic writer regression tests cover complete replacement, empty payloads, missing-parent rejection, and cleanup/original preservation after simulated write failure.
+- Outline navigation preserves existing Markdown HTML ids while adding stable outline targets; DOCX jumps match normalized heading text first, then use ordinal fallback.
+- Added a dedicated Android verification workflow for pull requests and branch pushes. It runs unit tests, core coverage, lint, detekt, debug APK assembly, and compile_applet only when that task exists; it uploads test/build reports and does not publish releases.
 - **Immersive Focus Mode** for PDF, image, Markdown and code/text views: viewer chrome and Android system bars hide together, with a subtle floating Back control and exit-focus hint.
 - **Reader Appearance Picker**: Claude Glass, Nord Dark and Warm Parchment palettes, with persistent font-size settings in the 11–22 sp range for Markdown and code/text previews.
 - **Markdown Outline / TOC** with jumpable Markdown headings and fenced-code exclusion.

@@ -3,7 +3,7 @@
 Priorities: **P0** data loss / crash / security · **P1** high-impact feature or correctness · **P2** quality · **P3** polish.
 
 ## KNOWN ISSUES (read first)
-1. **Loop 6 verification is pending.** The GitHub-connected editing environment could not establish a local checkout (network DNS resolution failed), so Compose/JavaScript changes and unit tests have not been run through Gradle. Run `./gradlew :app:testDebugUnitTest`, `./gradlew compile_applet` if supplied by the build harness, and `./gradlew assembleDebug` before merge. Do not interpret the feature checklist below as a passing build report.
+1. **Loop 6/7 Android verification is pending.** This editing environment could not establish a local checkout, so Gradle tasks were not run here. The dedicated .github/workflows/android-tests.yml workflow now runs on PRs to main and pushes to the Loop 6 branch. Check the actual workflow result, JUnit XML and reports before merging; no test/build pass is claimed until the run is green. Run `./gradlew :app:testDebugUnitTest`, `./gradlew compile_applet` if supplied by the build harness, and `./gradlew assembleDebug` before merge. Do not interpret the feature checklist below as a passing build report.
 2. Gradle wiring for JaCoCo (`jacocoCoreReport` / `jacocoCoreVerify`), `enableUnitTestCoverage`, detekt, and Room schema export is
    unverified. detekt is `ignoreFailures = true` until its first green run.
 3. Edits to files opened from another app are saved to the in-app copy only (the user is told). Write-back is P1 below.
@@ -39,7 +39,12 @@ Priorities: **P0** data loss / crash / security · **P1** high-impact feature or
 - [x] **Loop 6 — Outline / TOC**: Parse Markdown headings outside fences, extract styled DOCX headings, and offer PDF page-outline fallback.
 - [x] **Loop 6 — Atomic Export Copy**: Use the existing atomic write/index refresh path and select a new filename on collisions.
 - [x] **Loop 6 — DOCX zoom out**: Allow preview zoom down to 0.25×.
-- [ ] **Loop 6 Quality Gate**: Run :app:testDebugUnitTest, compile_applet when available, and assembleDebug on an Android-capable runner; not executed in this environment.
+- [x] **Loop 7 — PDF Search Hardening**: Case/whitespace normalization, locale-stable matching, and guards for non-positive result limits; regression tests added.
+- [x] **Loop 7 — Save As Safety**: Centralized safe filename selection and tests for source collisions, existing copies, path traversal, hidden files, and extensionless names.
+- [x] **Loop 7 — Atomic Write Tests**: Test successful replacement, empty payload, missing parent, and write-exception cleanup/data preservation.
+- [x] **Loop 7 — Outline Navigation**: Preserve existing Markdown ids and resolve DOCX heading jumps by normalized text before ordinal fallback.
+- [x] **Loop 7 — Dedicated CI**: Added Android tests/build workflow with unit tests, coverage, lint, detekt, optional compile_applet, debug APK and test artifacts.
+- [ ] **Loop 6/7 Quality Gate**: Await the dedicated GitHub Actions result; Android Gradle commands were not executed in the editing environment.
 
 ## P1
 - [ ] **Write-back to source URI** for files opened from other apps (store `sourceUri` on `RecentFileEntity`, Room `Migration(3,4)`, `openOutputStream(uri, "wt")`).
