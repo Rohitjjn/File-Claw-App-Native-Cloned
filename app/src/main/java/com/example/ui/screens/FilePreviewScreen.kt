@@ -3545,7 +3545,9 @@ fun WebViewPreview(
                                 ul, ol {
                                     padding-left: 20px;
                                 }
+                                ${copyCodePreviewStyles(isDark)}
                             </style>
+                            <script>${copyCodePreviewScript()}</script>
                             </head>
                             <body>
                                 ${formatSimpleMarkdownToHtml(content)}
@@ -3563,16 +3565,18 @@ fun WebViewPreview(
                                     color: ${if (isDark) "#FAF9F5" else "#141413"};
                                     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
                                     padding: 16px;
-                                    white-space: pre-wrap;
+                                    white-space: normal;
                                     word-wrap: break-word;
                                     line-height: 1.6;
                                     font-size: 14px;
                                     margin: 0;
                                     -webkit-text-size-adjust: none;
                                 }
+                                ${copyCodePreviewStyles(isDark)}
                             </style>
+                            <script>${copyCodePreviewScript()}</script>
                             </head>
-                            <body>${escapeHtml(content)}</body>
+                            <body>${formatFencedTextToHtml(content)}</body>
                             </html>
                             """.trimIndent()
                         }
