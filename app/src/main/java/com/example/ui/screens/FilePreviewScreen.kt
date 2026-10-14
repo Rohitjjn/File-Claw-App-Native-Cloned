@@ -31,10 +31,14 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Image
 import com.example.core.text.PdfTextSearcher
+import com.example.core.text.DocumentOutlineItem
+import com.example.core.text.DocumentOutlineParser
 import com.example.core.text.PdfSearchResult
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Folder
@@ -173,6 +177,11 @@ fun FilePreviewScreen(
     var showJumpDialog by remember { mutableStateOf(false) }
     var showJumpToLineDialog by remember { mutableStateOf(false) }
     var scrollToLineNumber by remember { mutableStateOf<Int?>(null) }
+    var showAppearanceDialog by rememberSaveable { mutableStateOf(false) }
+    var showOutlineSheet by rememberSaveable { mutableStateOf(false) }
+    var markdownOutlineJumpIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var docxOutlineJumpIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var outlineItems by remember { mutableStateOf<List<DocumentOutlineItem>>(emptyList()) }
 
     var isSearchInDocumentOpen by rememberSaveable { mutableStateOf(false) }
     var inViewerSearchQuery by rememberSaveable { mutableStateOf("") }
@@ -221,6 +230,47 @@ fun FilePreviewScreen(
     }
 
     val context = LocalContext.current
+    val viewerPreferences = remember(context) {
+        context.getSharedPreferences("viewer_appearance", android.content.Context.MODE_PRIVATE)
+    }
+    var appearanceTheme by rememberSaveable {
+        mutableStateOf(viewerPreferences.getString("theme", "Claude Glass") ?: "Claude Glass")
+    }
+    var appearanceFontSize by rememberSaveable {
+        mutableStateOf(viewerPreferences.getInt("font_size_sp", 16).coerceIn(11, 22))
+    }
+
+    val previewView = androidx.compose.ui.platform.LocalView.current
+    val previewWindow = remember(previewView) {
+        var activityContext: android.content.Context? = previewView.context
+        while (activityContext is android.content.ContextWrapper && activityContext !is android.app.Activity) {
+            activityContext = activityContext.baseContext
+        }
+        (activityContext as? android.app.Activity)?.window
+    }
+    DisposableEffect(previewWindow, previewView, isBarsVisible) {
+        val controller = previewWindow?.let { androidx.core.view.WindowInsetsControllerCompat(it, previewView) }
+        controller?.systemBarsBehavior =
+            androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        val systemBars = androidx.core.view.WindowInsetsCompat.Type.systemBars()
+        if (isBarsVisible) controller?.show(systemBars) else controller?.hide(systemBars)
+        onDispose { controller?.show(systemBars) }
+    }
+
+    LaunchedEffect(activeFile?.path) { isBarsVisible = true }
+    LaunchedEffect(activeFile?.path, activeFile?.extension, textContent, totalPdfPages) {
+        val file = activeFile
+        outlineItems = if (file == null) emptyList() else withContext(Dispatchers.IO) {
+            when (file.extension.lowercase()) {
+                "md" -> DocumentOutlineParser.fromMarkdown(textContent)
+                "docx" -> com.example.core.format.DocxExtractor.extractText(File(file.path)).outline
+                "pdf" -> (1..totalPdfPages.coerceAtLeast(0)).map { page ->
+                    DocumentOutlineItem(title = "Page $page", level = 1, targetIndex = page - 1)
+                }
+                else -> emptyList()
+            }
+        }
+    }
 
     // Restore previously opened file state on recreate
     // Attempted once per screen instance (process-death recovery). Without the flag, "Remove from history"
@@ -257,9 +307,10 @@ fun FilePreviewScreen(
     }
 
     androidx.activity.compose.BackHandler {
-        handleBack()
+        if (!isBarsVisible) isBarsVisible = true else handleBack()
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
             androidx.compose.animation.AnimatedVisibility(
@@ -290,8 +341,12 @@ fun FilePreviewScreen(
                             }
                         }
 
+                        val activeExtension = activeFile?.extension?.lowercase().orEmpty()
                         val isTextState = fileState is MainViewModel.FileContentState.TextSuccess ||
-                            (activeFile?.extension?.lowercase() in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv"))
+                            activeExtension in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
+                        val canCustomizeAppearance = activeExtension in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql")
+                        val canShowOutline = activeExtension in setOf("md", "pdf", "docx")
+                        val canUseImmersive = activeExtension in setOf("pdf", "png", "jpg", "jpeg", "webp", "gif", "txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
                         if (isTextState) {
                             IconButton(onClick = {
                                 val textToCopy = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
@@ -307,6 +362,31 @@ fun FilePreviewScreen(
                                     imageVector = Icons.Outlined.ContentCopy,
                                     contentDescription = "Copy all text",
                                     tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        if (canCustomizeAppearance) {
+                            IconButton(onClick = { isWebRenderActive = !isWebRenderActive }) {
+                                Icon(
+                                    imageVector = if (isWebRenderActive) Icons.Outlined.Code else Icons.Outlined.Language,
+                                    contentDescription = if (isWebRenderActive) "Switch to code/text view" else "Switch to rendered preview"
+                                )
+                            }
+                            IconButton(onClick = { showAppearanceDialog = true }) {
+                                Icon(Icons.Default.Settings, contentDescription = "Appearance")
+                            }
+                        }
+                        if (canShowOutline) {
+                            IconButton(onClick = { showOutlineSheet = true }) {
+                                Icon(Icons.Default.MenuBook, contentDescription = "Document outline")
+                            }
+                        }
+                        if (canUseImmersive) {
+                            IconButton(onClick = { isBarsVisible = !isBarsVisible }) {
+                                Icon(
+                                    imageVector = if (isBarsVisible) Icons.Default.Fullscreen else Icons.Default.FullscreenExit,
+                                    contentDescription = if (isBarsVisible) "Enter immersive focus mode" else "Exit immersive focus mode"
                                 )
                             }
                         }
@@ -1081,6 +1161,37 @@ fun FilePreviewScreen(
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("No file selected", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f))
                     }
+                }
+            }
+        }
+    }
+
+        if (!isBarsVisible) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                    shadowElevation = 5.dp,
+                    modifier = Modifier.align(Alignment.TopStart).padding(12.dp)
+                        .clickable { isBarsVisible = true; handleBack() }
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Back", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.68f),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
+                        .clickable { isBarsVisible = true }
+                ) {
+                    Text("Tap to exit focus", fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp))
                 }
             }
         }
