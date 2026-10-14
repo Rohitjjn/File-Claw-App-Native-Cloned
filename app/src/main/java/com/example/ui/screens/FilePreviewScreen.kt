@@ -36,7 +36,6 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Image
-import com.example.core.text.PdfTextSearcher
 import com.example.core.text.DocumentOutlineItem
 import com.example.core.text.DocumentOutlineParser
 import com.example.core.text.PdfSearchResult
@@ -271,13 +270,42 @@ fun FilePreviewScreen(
         }
         (activityContext as? android.app.Activity)?.window
     }
+    val originalWindowColors = remember(previewWindow) {
+        previewWindow?.let { it.statusBarColor to it.navigationBarColor }
+    }
     DisposableEffect(previewWindow, previewView, isBarsVisible) {
-        val controller = previewWindow?.let { androidx.core.view.WindowInsetsControllerCompat(it, previewView) }
+        val window = previewWindow
+        val controller = window?.let { androidx.core.view.WindowInsetsControllerCompat(it, previewView) }
         controller?.systemBarsBehavior =
             androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         val systemBars = androidx.core.view.WindowInsetsCompat.Type.systemBars()
-        if (isBarsVisible) controller?.show(systemBars) else controller?.hide(systemBars)
-        onDispose { controller?.show(systemBars) }
+        if (!isBarsVisible && window != null) {
+            // Transparent system bars let the document canvas reach the display edge in focus mode.
+            // Keeping the old opaque status-bar color was responsible for a black strip above the page.
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+            controller?.hide(systemBars)
+        } else {
+            if (window != null) {
+                originalWindowColors?.let { (status, navigation) ->
+                    window.statusBarColor = status
+                    window.navigationBarColor = navigation
+                }
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, true)
+            }
+            controller?.show(systemBars)
+        }
+        onDispose {
+            controller?.show(systemBars)
+            if (window != null) {
+                originalWindowColors?.let { (status, navigation) ->
+                    window.statusBarColor = status
+                    window.navigationBarColor = navigation
+                }
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, true)
+            }
+        }
     }
 
     LaunchedEffect(activeFile?.path) { isBarsVisible = true }
