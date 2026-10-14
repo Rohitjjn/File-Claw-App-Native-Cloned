@@ -1495,12 +1495,42 @@ fun MarkdownPreview(
     appearanceTheme: String = "Claude Glass",
     appearanceFontSize: Int? = null,
     scrollToHeadingIndex: Int? = null,
-    onOutlineJumpHandled: () -> Unit = {}
+    onOutlineJumpHandled: () -> Unit = {},
+    searchQuery: String = "",
+    searchNavigationToken: Int = 0,
+    searchNavigationForward: Boolean = true,
+    printRequested: Boolean = false,
+    onPrintHandled: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val isNightMode = androidx.compose.foundation.isSystemInDarkTheme()
     var generatedHtml by remember(markdownText, isNightMode, fontSizeSetting, appearanceTheme, appearanceFontSize) { mutableStateOf<String?>(null) }
     var isWebViewLoading by remember(markdownText, appearanceTheme, appearanceFontSize) { mutableStateOf(true) }
     var markdownWebViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
+
+    var lastSearchNavigationToken by remember { mutableStateOf(searchNavigationToken) }
+
+    LaunchedEffect(searchQuery, markdownWebViewRef, isWebViewLoading) {
+        val webView = markdownWebViewRef ?: return@LaunchedEffect
+        if (isWebViewLoading) return@LaunchedEffect
+        if (searchQuery.isBlank()) webView.clearMatches() else webView.findAllAsync(searchQuery)
+    }
+    LaunchedEffect(searchNavigationToken, searchQuery, markdownWebViewRef, isWebViewLoading) {
+        val webView = markdownWebViewRef ?: return@LaunchedEffect
+        if (!isWebViewLoading && searchQuery.isNotBlank() &&
+            searchNavigationToken != lastSearchNavigationToken
+        ) {
+            webView.findNext(searchNavigationForward)
+        }
+        lastSearchNavigationToken = searchNavigationToken
+    }
+    LaunchedEffect(printRequested, markdownWebViewRef, isWebViewLoading) {
+        val webView = markdownWebViewRef
+        if (printRequested && webView != null && !isWebViewLoading) {
+            com.example.utils.FilePrintHelper.printWebView(context, webView, fileEntity.name)
+            onPrintHandled()
+        }
+    }
 
     LaunchedEffect(scrollToHeadingIndex, markdownWebViewRef, isWebViewLoading) {
         if (scrollToHeadingIndex != null && markdownWebViewRef != null && !isWebViewLoading) {
