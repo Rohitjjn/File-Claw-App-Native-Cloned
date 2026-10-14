@@ -897,6 +897,8 @@ fun FilePreviewScreen(
                                         scrollToPage = pdfSearchResults[currentMatchIndex].pageNumber - 1
                                     } else if (textMatches.isNotEmpty()) {
                                         currentMatchIndex = (currentMatchIndex - 1 + textMatches.size) % textMatches.size
+                                        searchNavigationForward = false
+                                        searchNavigationToken++
                                     }
                                 },
                                 enabled = totalMatchesCount > 0,
@@ -913,6 +915,8 @@ fun FilePreviewScreen(
                                         scrollToPage = pdfSearchResults[currentMatchIndex].pageNumber - 1
                                     } else if (textMatches.isNotEmpty()) {
                                         currentMatchIndex = (currentMatchIndex + 1) % textMatches.size
+                                        searchNavigationForward = true
+                                        searchNavigationToken++
                                     }
                                 },
                                 enabled = totalMatchesCount > 0,
@@ -928,6 +932,8 @@ fun FilePreviewScreen(
                                 inViewerSearchQuery = ""
                                 pdfSearchResults = emptyList()
                                 totalMatchesCount = 0
+                                currentMatchIndex = 0
+                                searchNavigationToken++
                             },
                             modifier = Modifier.size(28.dp)
                         ) {
