@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.25, maximum-scale=5.0, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=0.55, minimum-scale=0.25, maximum-scale=5.0, user-scalable=yes">
     <script src="jszip.min.js"></script>
     <script src="docx-preview.min.js"></script>
     <style>
@@ -51,9 +51,27 @@
             color: #f5f5f3 !important;
             box-shadow: 0 4px 16px rgba(0,0,0,0.3) !important;
         }
-        body.dark .docx p, body.dark .docx span, body.dark .docx td {
-            color: #e0deda !important;
+        body.dark .docx p,
+        body.dark .docx span,
+        body.dark .docx li,
+        body.dark .docx td,
+        body.dark .docx th {
+            color: #e5e7eb !important;
         }
+        body.dark .docx table,
+        body.dark .docx tr,
+        body.dark .docx td,
+        body.dark .docx th {
+            background-color: #20242c !important;
+            border-color: #454b57 !important;
+        }
+        body.dark .docx h1, body.dark .docx h2, body.dark .docx h3,
+        body.dark .docx h4, body.dark .docx h5, body.dark .docx h6 {
+            color: #f3f4f6 !important;
+        }
+        body.dark .docx a { color: #88c0d0 !important; }
+        body.dark .docx-wrapper { background: transparent !important; }
+        body.dark #output { background: #151514; }
         .loading-banner {
             display: flex;
             align-items: center;
@@ -79,6 +97,12 @@
     </div>
 
     <script>
+        window.setDocumentDarkMode = function(isDark) {
+            document.body.classList.toggle('dark', !!isDark);
+            var output = document.getElementById('output');
+            if (output) output.style.backgroundColor = isDark ? '#151514' : '#faf9f5';
+        };
+
         window.scrollToHeading = function(index, expectedTitle) {
             var output = document.getElementById('output');
             if (!output) return;
@@ -104,11 +128,7 @@
         };
 
         function loadDocx(base64, isDark) {
-            if (isDark) {
-                document.body.classList.add('dark');
-            } else {
-                document.body.classList.remove('dark');
-            }
+            window.setDocumentDarkMode(isDark);
 
             const container = document.getElementById("output");
             const loadingEl = document.getElementById("loading");
