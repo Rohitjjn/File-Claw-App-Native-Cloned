@@ -79,11 +79,25 @@
     </div>
 
     <script>
-        window.scrollToHeading = function(index) {
+        window.scrollToHeading = function(index, expectedTitle) {
             var output = document.getElementById('output');
             if (!output) return;
             var headings = output.querySelectorAll('h1, h2, h3, h4, h5, h6, [class*="Heading"], [class*="heading"]');
-            var target = headings[index];
+            var normalize = function(value) {
+                return (value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+            };
+            var wanted = normalize(expectedTitle);
+            var target = null;
+            if (wanted) {
+                for (var i = 0; i < headings.length; i++) {
+                    if (normalize(headings[i].textContent) === wanted) {
+                        target = headings[i];
+                        break;
+                    }
+                }
+            }
+            // Ordinal is a compatibility fallback if the renderer exposes no matching heading text.
+            if (!target) target = headings[index];
             if (target && typeof target.scrollIntoView === 'function') {
                 target.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }

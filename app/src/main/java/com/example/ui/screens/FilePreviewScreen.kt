@@ -181,6 +181,7 @@ fun FilePreviewScreen(
     var showOutlineSheet by rememberSaveable { mutableStateOf(false) }
     var markdownOutlineJumpIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     var docxOutlineJumpIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var docxOutlineJumpTitle by rememberSaveable { mutableStateOf<String?>(null) }
     var outlineItems by remember { mutableStateOf<List<DocumentOutlineItem>>(emptyList()) }
 
     var isSearchInDocumentOpen by rememberSaveable { mutableStateOf(false) }
@@ -1127,7 +1128,11 @@ fun FilePreviewScreen(
                         scrollToPage = scrollToPage,
                         onScrollProgressHandled = { scrollToPage = null },
                         scrollToHeadingIndex = docxOutlineJumpIndex,
-                        onOutlineJumpHandled = { docxOutlineJumpIndex = null }
+                        scrollToHeadingTitle = docxOutlineJumpTitle,
+                        onOutlineJumpHandled = {
+                            docxOutlineJumpIndex = null
+                            docxOutlineJumpTitle = null
+                        }
                     )
                 }
                 is MainViewModel.FileContentState.PptxSuccess -> {
@@ -1318,7 +1323,10 @@ fun FilePreviewScreen(
                                             isWebRenderActive = false
                                             markdownOutlineJumpIndex = item.targetIndex
                                         }
-                                        "docx" -> docxOutlineJumpIndex = item.targetIndex
+                                        "docx" -> {
+                                            docxOutlineJumpIndex = item.targetIndex
+                                            docxOutlineJumpTitle = item.title
+                                        }
                                         "pdf" -> scrollToPage = item.targetIndex
                                     }
                                     showOutlineSheet = false
@@ -1510,8 +1518,8 @@ fun MarkdownPreview(
             val outlinedHtml = rawHtml.replace(Regex("<h([1-6])([^>]*)>")) { match ->
                 val ordinal = headingOrdinal++
                 val attrs = match.groupValues[2]
-                if (Regex("\\bid\\s*=").containsMatchIn(attrs)) match.value
-                else "<h" + match.groupValues[1] + attrs + " id=\"md-heading-" + ordinal + "\">"
+                if (Regex("\\bdata-fileclaw-outline-index\\s*=").containsMatchIn(attrs)) match.value
+                else "<h" + match.groupValues[1] + attrs + " data-fileclaw-outline-index=\"" + ordinal + "\">"
             }
 
             val fontSize = (appearanceFontSize ?: when (fontSizeSetting) {
@@ -1711,7 +1719,7 @@ fun MarkdownPreview(
                 </style>
                 <script>
                     window.scrollToOutline = function(index) {
-                        var target = document.getElementById('md-heading-' + index);
+                        var target = document.querySelector('[data-fileclaw-outline-index="' + index + '"]');
                         if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     };
                     function copyCode(btn, codeId) {
@@ -3636,6 +3644,7 @@ fun DocxPreviewWebView(
     scrollToPage: Int? = null,
     onScrollProgressHandled: () -> Unit = {},
     scrollToHeadingIndex: Int? = null,
+    scrollToHeadingTitle: String? = null,
     onOutlineJumpHandled: () -> Unit = {}
 ) {
     var isWebViewLoading by remember(base64Docx) { mutableStateOf(true) }
@@ -3651,10 +3660,11 @@ fun DocxPreviewWebView(
             onScrollProgressHandled()
         }
     }
-    LaunchedEffect(scrollToHeadingIndex, webViewRef, isWebViewLoading) {
+    LaunchedEffect(scrollToHeadingIndex, scrollToHeadingTitle, webViewRef, isWebViewLoading) {
         if (scrollToHeadingIndex != null && webViewRef != null && !isWebViewLoading) {
+            val escapedTitle = org.json.JSONObject.quote(scrollToHeadingTitle.orEmpty())
             webViewRef?.evaluateJavascript(
-                "if (typeof window.scrollToHeading === 'function') { window.scrollToHeading($scrollToHeadingIndex); }",
+                "if (typeof window.scrollToHeading === 'function') { window.scrollToHeading($scrollToHeadingIndex, $escapedTitle); }",
                 null
             )
             onOutlineJumpHandled()
