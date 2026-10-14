@@ -15,6 +15,7 @@ import com.example.core.format.FormatDetector
 import com.example.core.format.FormatRegistry
 import com.example.core.format.Support
 import com.example.core.io.AtomicFileWriter
+import com.example.core.io.CopyFileNamer
 import com.example.core.io.BatchFileOperations
 import com.example.core.io.TextEncoding
 import com.example.core.io.TextLoadException
@@ -815,16 +816,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "$trimmedName.${originalEntity.extension}"
                 }
 
-                val extensionSuffix = targetName.substringAfterLast('.', "").let { if (it.isBlank()) "" else ".$it" }
-                val fileStem = if (extensionSuffix.isEmpty()) targetName else targetName.removeSuffix(extensionSuffix)
-                var targetFile = File(parentDir, targetName)
-                var collisionNumber = 2
-                // Save As creates a distinct copy and never replaces the original or an existing export.
-                while (targetFile.absoluteFile == originalFile.absoluteFile || targetFile.exists()) {
-                    val suffix = if (collisionNumber == 2) " (copy)" else " (copy $collisionNumber)"
-                    targetFile = File(parentDir, "$fileStem$suffix$extensionSuffix")
-                    collisionNumber++
-                }
+                val targetFile = CopyFileNamer.nextAvailable(parentDir, originalFile, targetName)
                 val bytes = content.toByteArray(Charsets.UTF_8)
 
                 // Atomic crash-safe write

@@ -25,6 +25,10 @@ class DocxExtractorTest {
                     <w:p>
                         <w:r><w:t>This is a paragraph test for DOCX extraction &amp; viewing.</w:t></w:r>
                     </w:p>
+                    <w:p>
+                        <w:pPr><w:pStyle w:val="Heading3"/></w:pPr>
+                        <w:r><w:t>Second heading after regular body text</w:t></w:r>
+                    </w:p>
                 </w:body>
             </w:document>
         """.trimIndent()
@@ -38,12 +42,16 @@ class DocxExtractorTest {
         val result = DocxExtractor.extractText(docxBytes, "test.docx")
 
         assertEquals("File Claw Offline Document", result.title)
-        assertEquals(2, result.paragraphs.size)
+        assertEquals(3, result.paragraphs.size)
         assertTrue(result.plainText.contains("File Claw Offline Document"))
         assertTrue(result.plainText.contains("This is a paragraph test for DOCX extraction & viewing."))
         assertTrue(result.wordCount > 5)
-        assertEquals(listOf("File Claw Offline Document"), result.outline.map { it.title })
-        assertEquals(1, result.outline.single().level)
+        assertEquals(
+            listOf("File Claw Offline Document", "Second heading after regular body text"),
+            result.outline.map { it.title }
+        )
+        assertEquals(listOf(1, 3), result.outline.map { it.level })
+        assertEquals(listOf(0, 1), result.outline.map { it.targetIndex })
     }
 
     @Test
