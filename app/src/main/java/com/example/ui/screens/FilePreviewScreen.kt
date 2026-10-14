@@ -205,7 +205,7 @@ fun FilePreviewScreen(
     // PDFBox extracts actual page text so search hits jump to physical pages, not stream ordinals.
     LaunchedEffect(inViewerSearchQuery, activeFile?.path, fileState) {
         if (fileState is MainViewModel.FileContentState.PdfSuccess &&
-            inViewerSearchQuery.length >= 2 && activeFile != null
+            inViewerSearchQuery.isNotBlank() && activeFile != null
         ) {
             val res = withContext(Dispatchers.IO) {
                 com.example.utils.PdfDocumentSearch.search(searchContext, File(activeFile.path), inViewerSearchQuery)
@@ -228,7 +228,7 @@ fun FilePreviewScreen(
         else -> ""
     }
     val textMatches = remember(searchableText, inViewerSearchQuery) {
-        if (inViewerSearchQuery.length >= 2 && searchableText.isNotEmpty()) {
+        if (inViewerSearchQuery.isNotBlank() && searchableText.isNotEmpty()) {
             val matches = mutableListOf<Int>()
             var index = searchableText.indexOf(inViewerSearchQuery, ignoreCase = true)
             while (index >= 0 && matches.size < 500) {

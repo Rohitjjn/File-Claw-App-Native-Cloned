@@ -14,7 +14,6 @@ import android.webkit.WebViewClient
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import java.io.File
-import java.io.FileOutputStream
 
 /**
  * Native Print and Export helper using Android's PrintManager & PrintDocumentAdapter.
@@ -93,7 +92,7 @@ object FilePrintHelper {
                         return
                     }
                     PdfDocumentSearch.loadDocument(pdfFile, password).use { source ->
-                        val selected = if (pages.any { it == PageRange.ALL_PAGES }) {
+                        val selected = if (pages.any { it.start == 0 && it.end == Int.MAX_VALUE }) {
                             (0 until source.numberOfPages).toList()
                         } else {
                             pages.flatMap { range ->
