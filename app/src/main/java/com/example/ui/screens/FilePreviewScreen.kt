@@ -3852,13 +3852,53 @@ fun DocxPreviewWebView(
     onScrollProgressHandled: () -> Unit = {},
     scrollToHeadingIndex: Int? = null,
     scrollToHeadingTitle: String? = null,
+    searchQuery: String = "",
+    searchNavigationToken: Int = 0,
+    searchNavigationForward: Boolean = true,
+    printRequested: Boolean = false,
+    onPrintHandled: () -> Unit = {},
     onOutlineJumpHandled: () -> Unit = {}
 ) {
     var isWebViewLoading by remember(base64Docx) { mutableStateOf(true) }
     var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
     var pureKotlinFallback by remember { mutableStateOf<com.example.core.format.DocxExtractor.ExtractedDocx?>(null) }
-    
+    var lastAppliedSearchQuery by remember(fileEntity.path) { mutableStateOf<String?>(null) }
+    var lastAppliedSearchNavigationToken by remember(fileEntity.path) { mutableStateOf(searchNavigationToken) }
+
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    LaunchedEffect(searchQuery, webViewRef, isWebViewLoading) {
+        val webView = webViewRef ?: return@LaunchedEffect
+        if (isWebViewLoading) return@LaunchedEffect
+        if (lastAppliedSearchQuery != searchQuery) {
+            if (searchQuery.isBlank()) webView.clearMatches() else webView.findAllAsync(searchQuery)
+            lastAppliedSearchQuery = searchQuery
+            lastAppliedSearchNavigationToken = searchNavigationToken
+        }
+    }
+    LaunchedEffect(searchNavigationToken, searchQuery, webViewRef, isWebViewLoading) {
+        val webView = webViewRef ?: return@LaunchedEffect
+        if (!isWebViewLoading && searchQuery.isNotBlank() &&
+            searchNavigationToken != lastAppliedSearchNavigationToken
+        ) {
+            webView.findNext(searchNavigationForward)
+            lastAppliedSearchNavigationToken = searchNavigationToken
+        }
+    }
+    LaunchedEffect(isNightMode, webViewRef, isWebViewLoading) {
+        val webView = webViewRef ?: return@LaunchedEffect
+        if (!isWebViewLoading) {
+            webView.setBackgroundColor(if (isNightMode) 0xFF151514.toInt() else 0xFFFAF9F5.toInt())
+            webView.evaluateJavascript("if (window.setDocumentDarkMode) window.setDocumentDarkMode($isNightMode);", null)
+        }
+    }
+    LaunchedEffect(printRequested, webViewRef, isWebViewLoading) {
+        val webView = webViewRef
+        if (printRequested && webView != null && !isWebViewLoading) {
+            com.example.utils.FilePrintHelper.printWebView(context, webView, fileEntity.name)
+            onPrintHandled()
+        }
+    }
 
     LaunchedEffect(scrollToPage, webViewRef) {
         if (scrollToPage != null && webViewRef != null) {
@@ -3928,6 +3968,11 @@ fun DocxPreviewWebView(
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
+                            setSupportZoom(true)
+                            builtInZoomControls = true
+                            displayZoomControls = false
+                            useWideViewPort = true
+                            loadWithOverviewMode = true
                             allowFileAccess = true
                             allowContentAccess = true
                             @Suppress("DEPRECATION")
