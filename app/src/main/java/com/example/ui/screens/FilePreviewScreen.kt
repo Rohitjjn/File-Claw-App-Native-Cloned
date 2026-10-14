@@ -373,7 +373,11 @@ fun FilePreviewScreen(
                                     contentDescription = if (isWebRenderActive) "Switch to code/text view" else "Switch to rendered preview"
                                 )
                             }
-                            IconButton(onClick = { showAppearanceDialog = true }) {
+                            IconButton(onClick = {
+                                // Route text/Markdown into the native themed reader before opening appearance.
+                                isWebRenderActive = false
+                                showAppearanceDialog = true
+                            }) {
                                 Icon(Icons.Default.Settings, contentDescription = "Appearance")
                             }
                         }
@@ -1310,7 +1314,10 @@ fun FilePreviewScreen(
                             Row(
                                 modifier = Modifier.fillMaxWidth().clickable {
                                     when (outlineExtension) {
-                                        "md" -> markdownOutlineJumpIndex = item.targetIndex
+                                        "md" -> {
+                                            isWebRenderActive = false
+                                            markdownOutlineJumpIndex = item.targetIndex
+                                        }
                                         "docx" -> docxOutlineJumpIndex = item.targetIndex
                                         "pdf" -> scrollToPage = item.targetIndex
                                     }

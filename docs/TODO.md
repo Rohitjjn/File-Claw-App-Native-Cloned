@@ -15,7 +15,7 @@ Priorities: **P0** data loss / crash / security · **P1** high-impact feature or
 9. `applicationId` is still the AI-Studio-generated `com.aistudio.filesclaw.apxqzy`; JitPack repository is unscoped (supply-chain exposure).
 
 ## P0
-- [x] Run the Quality Gate on a real machine and fix compile fallout (Verified: compile_applet and testDebugUnitTest green).
+- [ ] Run the Loop 6 Quality Gate on an Android-capable runner and fix compile fallout (pending in this branch; see KNOWN ISSUES #1).
 - [x] Archive-password dialog masks input (`PasswordVisualTransformation`), PDF password also masked.
 - [x] `autoSaveDrafts` renamed to "Auto-save on Exit" with clear explanation; notification updated to "Changes saved to file."
 - [x] Surface corrupt-PDF errors cleanly with error display and back action instead of endless spinner.
