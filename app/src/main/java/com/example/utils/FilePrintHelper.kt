@@ -1,11 +1,20 @@
 package com.example.utils
 
 import android.content.Context
+import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.ParcelFileDescriptor
+import android.print.PageRange
 import android.print.PrintAttributes
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
 import android.print.PrintManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
 import java.io.File
+import java.io.FileOutputStream
 
 /**
  * Native Print and Export helper using Android's PrintManager & PrintDocumentAdapter.
@@ -26,6 +35,102 @@ object FilePrintHelper {
             PrintAttributes.Builder()
                 .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
                 .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                .build()
+        )
+    }
+
+
+    /**
+     * Print an existing PDF without reading its binary bytes as text or rasterizing its pages.
+     * The system print service receives a valid PDF, and requested page ranges are preserved.
+     */
+    fun printPdf(
+        context: Context,
+        pdfFile: File,
+        title: String,
+        password: String? = null
+    ) {
+        val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
+        if (!pdfFile.isFile || !pdfFile.canRead()) {
+            android.widget.Toast.makeText(context, "PDF file is not readable.", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+
+        PDFBoxResourceLoader.init(context.applicationContext)
+        val adapter = object : PrintDocumentAdapter() {
+            override fun onLayout(
+                oldAttributes: PrintAttributes?,
+                newAttributes: PrintAttributes?,
+                cancellationSignal: CancellationSignal,
+                callback: LayoutResultCallback,
+                extras: Bundle?
+            ) {
+                try {
+                    if (cancellationSignal.isCanceled) {
+                        callback.onLayoutCancelled()
+                        return
+                    }
+                    val pageCount = PdfDocumentSearch.loadDocument(pdfFile, password).use { it.numberOfPages }
+                    val info = PrintDocumentInfo.Builder("$title.pdf")
+                        .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                        .setPageCount(pageCount)
+                        .build()
+                    callback.onLayoutFinished(info, oldAttributes != newAttributes)
+                } catch (error: Exception) {
+                    callback.onLayoutFailed(error.localizedMessage ?: "Could not read PDF pages.")
+                }
+            }
+
+            override fun onWrite(
+                pages: Array<PageRange>,
+                destination: ParcelFileDescriptor,
+                cancellationSignal: CancellationSignal,
+                callback: WriteResultCallback
+            ) {
+                try {
+                    if (cancellationSignal.isCanceled) {
+                        callback.onWriteCancelled()
+                        return
+                    }
+                    PdfDocumentSearch.loadDocument(pdfFile, password).use { source ->
+                        val selected = if (pages.any { it == PageRange.ALL_PAGES }) {
+                            (0 until source.numberOfPages).toList()
+                        } else {
+                            pages.flatMap { range ->
+                                (range.start.coerceAtLeast(0)..range.end.coerceAtMost(source.numberOfPages - 1)).toList()
+                            }.distinct().sorted()
+                        }
+
+                        if (selected.isEmpty()) {
+                            callback.onWriteFinished(emptyArray())
+                            return
+                        }
+
+                        PDDocument().use { output ->
+                            for (pageIndex in selected) {
+                                if (cancellationSignal.isCanceled) {
+                                    callback.onWriteCancelled()
+                                    return
+                                }
+                                output.importPage(source.getPage(pageIndex))
+                            }
+                            ParcelFileDescriptor.AutoCloseOutputStream(destination).use { outputStream ->
+                                output.save(outputStream)
+                            }
+                        }
+                        callback.onWriteFinished(arrayOf(PageRange(0, selected.size - 1)))
+                    }
+                } catch (error: Exception) {
+                    callback.onWriteFailed(error.localizedMessage ?: "Could not export PDF.")
+                }
+            }
+        }
+
+        printManager.print(
+            title,
+            adapter,
+            PrintAttributes.Builder()
+                .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
                 .build()
         )
     }

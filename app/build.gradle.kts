@@ -143,6 +143,8 @@ dependencies {
     implementation(libs.telephoto.zoomable.coil)
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.3")
+    // Full PDF text extraction, accurate page-based search, and vector-preserving Print-to-PDF.
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("org.jetbrains:markdown:0.7.3")
 
     // Archives and Excel (read-only). CSV/TSV is parsed by com.example.core.csv.
