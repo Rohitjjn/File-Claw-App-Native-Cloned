@@ -3168,13 +3168,48 @@ fun WebViewPreview(
     modifier: Modifier = Modifier,
     allowScripts: Boolean = false,
     searchQuery: String = "",
+    searchNavigationToken: Int = 0,
+    searchNavigationForward: Boolean = true,
+    printRequested: Boolean = false,
+    onPrintHandled: () -> Unit = {},
     onSingleTap: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val isDark = MaterialTheme.colorScheme.background == com.example.ui.theme.ClaudeOnyx
     val bgColor = if (isDark) com.example.ui.theme.ClaudeOnyx else Color.White
 
     var base64Data by remember { mutableStateOf<String?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    var webViewRef by remember(fileEntity.path) { mutableStateOf<android.webkit.WebView?>(null) }
+    var isWebViewPageLoaded by remember(fileEntity.path) { mutableStateOf(false) }
+    var lastAppliedSearchQuery by remember(fileEntity.path) { mutableStateOf<String?>(null) }
+    var lastAppliedSearchNavigationToken by remember(fileEntity.path) { mutableStateOf(searchNavigationToken) }
+
+    LaunchedEffect(searchQuery, webViewRef, isWebViewPageLoaded) {
+        val webView = webViewRef ?: return@LaunchedEffect
+        if (!isWebViewPageLoaded) return@LaunchedEffect
+        if (lastAppliedSearchQuery != searchQuery) {
+            if (searchQuery.isBlank()) webView.clearMatches() else webView.findAllAsync(searchQuery)
+            lastAppliedSearchQuery = searchQuery
+            lastAppliedSearchNavigationToken = searchNavigationToken
+        }
+    }
+    LaunchedEffect(searchNavigationToken, searchQuery, webViewRef, isWebViewPageLoaded) {
+        val webView = webViewRef ?: return@LaunchedEffect
+        if (isWebViewPageLoaded && searchQuery.isNotBlank() &&
+            searchNavigationToken != lastAppliedSearchNavigationToken
+        ) {
+            webView.findNext(searchNavigationForward)
+            lastAppliedSearchNavigationToken = searchNavigationToken
+        }
+    }
+    LaunchedEffect(printRequested, webViewRef, isWebViewPageLoaded) {
+        val webView = webViewRef
+        if (printRequested && webView != null && isWebViewPageLoaded) {
+            com.example.utils.FilePrintHelper.printWebView(context, webView, fileEntity.name)
+            onPrintHandled()
+        }
+    }
 
     LaunchedEffect(fileEntity) {
         if (fileEntity.extension.lowercase() == "pdf") {
@@ -3196,7 +3231,6 @@ fun WebViewPreview(
             .fillMaxSize()
             .background(bgColor)
     ) {
-        val context = LocalContext.current
         val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
 
         if (fileEntity.extension.lowercase() == "pdf" && base64Data == null && loadError == null) {
@@ -3211,6 +3245,7 @@ fun WebViewPreview(
             AndroidView(
                 factory = { ctx ->
                     android.webkit.WebView(ctx).apply {
+                        webViewRef = this
                         // HTML files are untrusted: scripts start off (see allowScripts), no bridge object is
                         // exposed to them, and navigation away from local files is blocked.
                         val htmlPage = fileEntity.extension.lowercase().let { it == "html" || it == "htm" }
@@ -3230,8 +3265,16 @@ fun WebViewPreview(
                             addJavascriptInterface(object {
                                 @android.webkit.JavascriptInterface
                                 fun performSingleTap() {
+                                    mainHandler.post { onSingleTap() }
+                                }
+
+                                @android.webkit.JavascriptInterface
+                                fun copyToClipboard(text: String) {
                                     mainHandler.post {
-                                        onSingleTap()
+                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                            as? android.content.ClipboardManager
+                                        clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Code block", text))
+                                        android.widget.Toast.makeText(context, "Code copied", android.widget.Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }, "Android")
@@ -3239,6 +3282,10 @@ fun WebViewPreview(
 
                         setBackgroundColor(if (isDark) 0xFF181715.toInt() else 0xFFFAF9F5.toInt())
                         webViewClient = object : android.webkit.WebViewClient() {
+                            override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                                isWebViewPageLoaded = true
+                            }
+
                             override fun shouldOverrideUrlLoading(
                                 view: android.webkit.WebView,
                                 request: android.webkit.WebResourceRequest
@@ -3248,14 +3295,14 @@ fun WebViewPreview(
                     }
                 },
                 update = { webView ->
-                    if (searchQuery.isNotEmpty()) {
-                        webView.findAllAsync(searchQuery)
-                    } else {
-                        webView.clearMatches()
-                    }
+                    webViewRef = webView
                     val ext = fileEntity.extension.lowercase()
                     if (ext == "html" || ext == "htm") {
-                        loadLocalFileOnce(webView, fileEntity.path, allowScripts)
+                        val sourceKey = "${android.net.Uri.fromFile(File(fileEntity.path))}|$allowScripts"
+                        if (webView.tag != sourceKey) {
+                            isWebViewPageLoaded = false
+                            loadLocalFileOnce(webView, fileEntity.path, allowScripts)
+                        }
                     } else if (ext == "pdf") {
                         try {
                             val base64Pdf = base64Data ?: ""
@@ -3429,7 +3476,12 @@ fun WebViewPreview(
                                 </body>
                                 </html>
                             """.trimIndent()
-                            webView.loadDataWithBaseURL("file:///android_asset/", htmlContent, "text/html", "UTF-8", null)
+                            val contentKey = "pdf-preview:${htmlContent.hashCode()}:${htmlContent.length}"
+                            if (webView.tag != contentKey) {
+                                webView.tag = contentKey
+                                isWebViewPageLoaded = false
+                                webView.loadDataWithBaseURL("file:///android_asset/", htmlContent, "text/html", "UTF-8", null)
+                            }
                         } catch (e: Exception) {
                             webView.loadDataWithBaseURL(null, "<html><body><h3>Error: ${e.message}</h3></body></html>", "text/html", "UTF-8", null)
                         }
@@ -3524,7 +3576,12 @@ fun WebViewPreview(
                             </html>
                             """.trimIndent()
                         }
-                        webView.loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
+                        val contentKey = "text-preview:${htmlContent.hashCode()}:${htmlContent.length}"
+                        if (webView.tag != contentKey) {
+                            webView.tag = contentKey
+                            isWebViewPageLoaded = false
+                            webView.loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
+                        }
                     } catch (e: Exception) {
                         loadLocalFileOnce(webView, fileEntity.path, allowScripts)
                     }
