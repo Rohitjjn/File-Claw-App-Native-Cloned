@@ -353,6 +353,7 @@ fun FilePreviewScreen(
                     actions = {
                         val canSearchInDoc = fileState is MainViewModel.FileContentState.PdfSuccess ||
                             fileState is MainViewModel.FileContentState.TextSuccess ||
+                            fileState is MainViewModel.FileContentState.DocxSuccess ||
                             (activeFile?.extension?.lowercase() in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv"))
                         if (canSearchInDoc) {
                             IconButton(onClick = { isSearchInDocumentOpen = !isSearchInDocumentOpen }) {
@@ -513,14 +514,16 @@ fun FilePreviewScreen(
                                     onClick = {
                                         showMenu = false
                                         activeFile?.let { entity ->
-                                            val ext = entity.extension.lowercase()
-                                            if (ext in setOf("png", "jpg", "jpeg", "webp", "gif")) {
-                                                com.example.utils.FilePrintHelper.printImage(context, java.io.File(entity.path), entity.name)
-                                            } else {
-                                                val content = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
-                                                    ?: runCatching { java.io.File(entity.path).readText() }.getOrNull()
-                                                    ?: ""
-                                                com.example.utils.FilePrintHelper.printTextOrMarkdown(context, content, entity.name)
+                                            when (entity.extension.lowercase()) {
+                                                "pdf" -> com.example.utils.FilePrintHelper.printPdf(context, File(entity.path), entity.name)
+                                                "docx", "txt", "md" -> printRequested = true
+                                                "png", "jpg", "jpeg", "webp", "gif" ->
+                                                    com.example.utils.FilePrintHelper.printImage(context, File(entity.path), entity.name)
+                                                else -> android.widget.Toast.makeText(
+                                                    context,
+                                                    "Print/export is available for PDF, DOCX, TXT and Markdown files.",
+                                                    android.widget.Toast.LENGTH_LONG
+                                                ).show()
                                             }
                                         }
                                     },
@@ -655,6 +658,23 @@ fun FilePreviewScreen(
                                         )
                                     }
 
+                                    // Export the source PDF directly; preserve selectable text and vector graphics.
+                                    IconButton(
+                                        onClick = {
+                                            activeFile?.let {
+                                                com.example.utils.FilePrintHelper.printPdf(context, File(it.path), it.name)
+                                            }
+                                        },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.Print,
+                                            contentDescription = "Print or export PDF",
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+
                                     // Share File
                                     IconButton(
                                         onClick = { activeFile?.let { shareFile(context, File(it.path), it.extension) } },
@@ -752,10 +772,7 @@ fun FilePreviewScreen(
                                     // Print / Export as PDF
                                     IconButton(
                                         onClick = {
-                                            val textToPrint = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
-                                                ?: runCatching { activeFile?.let { java.io.File(it.path).readText() } }.getOrNull()
-                                                ?: ""
-                                            com.example.utils.FilePrintHelper.printTextOrMarkdown(context, textToPrint, activeFile?.name ?: "Document")
+                                            printRequested = true
                                         },
                                         modifier = Modifier.size(36.dp)
                                     ) {
@@ -1062,6 +1079,10 @@ fun FilePreviewScreen(
                                     fileEntity = state.file,
                                     allowScripts = htmlScriptsEnabled,
                                     searchQuery = inViewerSearchQuery,
+                                    searchNavigationToken = searchNavigationToken,
+                                    searchNavigationForward = searchNavigationForward,
+                                    printRequested = printRequested,
+                                    onPrintHandled = { printRequested = false },
                                     onSingleTap = { isBarsVisible = !isBarsVisible },
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -1074,6 +1095,11 @@ fun FilePreviewScreen(
                                     appearanceFontSize = appearanceFontSize,
                                     scrollToHeadingIndex = markdownOutlineJumpIndex,
                                     onOutlineJumpHandled = { markdownOutlineJumpIndex = null },
+                                    searchQuery = inViewerSearchQuery,
+                                    searchNavigationToken = searchNavigationToken,
+                                    searchNavigationForward = searchNavigationForward,
+                                    printRequested = printRequested,
+                                    onPrintHandled = { printRequested = false },
                                     modifier = Modifier.fillMaxSize()
                                 )
                             } else {
@@ -1087,6 +1113,11 @@ fun FilePreviewScreen(
                                     showLineNumbers = settings.showLineNumbers,
                                     scrollToLine = scrollToLineNumber,
                                     onScrollToLineHandled = { scrollToLineNumber = null },
+                                    searchQuery = inViewerSearchQuery,
+                                    searchNavigationToken = searchNavigationToken,
+                                    searchNavigationForward = searchNavigationForward,
+                                    printRequested = printRequested,
+                                    onPrintHandled = { printRequested = false },
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -1157,6 +1188,11 @@ fun FilePreviewScreen(
                         onScrollProgressHandled = { scrollToPage = null },
                         scrollToHeadingIndex = docxOutlineJumpIndex,
                         scrollToHeadingTitle = docxOutlineJumpTitle,
+                        searchQuery = inViewerSearchQuery,
+                        searchNavigationToken = searchNavigationToken,
+                        searchNavigationForward = searchNavigationForward,
+                        printRequested = printRequested,
+                        onPrintHandled = { printRequested = false },
                         onOutlineJumpHandled = {
                             docxOutlineJumpIndex = null
                             docxOutlineJumpTitle = null
