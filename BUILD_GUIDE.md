@@ -10,14 +10,15 @@ Set `ANDROID_HOME` (or `local.properties` → `sdk.dir=...`).
 ```
 APK: `app/build/outputs/apk/debug/app-debug.apk`. No keystore needed: without `debug.keystore.base64` the AGP debug key is used.
 
-## Quality Gate (run this first on a new machine; cycle 1 could not run it)
+## Quality Gate
 ```
-./gradlew build                        # compile + all checks
-./gradlew testDebugUnitTest            # 91 JUnit tests (core/)
-./gradlew jacocoCoreVerify             # fails below 80 % line coverage of com.example.core
-./gradlew lintDebug detekt             # lint must have 0 errors; detekt is advisory for now
-./gradlew assembleDebug
+./gradlew :app:testDebugUnitTest
+./gradlew :app:jacocoCoreReport :app:jacocoCoreVerify
+./gradlew :app:lintDebug
+./gradlew :app:detekt
+./gradlew :app:assembleDebug
 ```
+The separate GitHub Actions workflow .github/workflows/android-tests.yml runs these checks for pull requests targeting main, uploads JUnit/JaCoCo/lint reports and a debug APK, and checks whether compile_applet exists before attempting it. It does not create releases or publish artifacts publicly. Review the workflow result and downloaded reports before merging.
 If the first build fails to compile, the likely places are listed in `docs/TODO.md` → KNOWN ISSUES #1.
 
 ## Verify the core without Gradle

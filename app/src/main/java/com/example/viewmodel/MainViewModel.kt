@@ -15,6 +15,7 @@ import com.example.core.format.FormatDetector
 import com.example.core.format.FormatRegistry
 import com.example.core.format.Support
 import com.example.core.io.AtomicFileWriter
+import com.example.core.io.CopyFileNamer
 import com.example.core.io.BatchFileOperations
 import com.example.core.io.TextEncoding
 import com.example.core.io.TextLoadException
@@ -815,7 +816,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "$trimmedName.${originalEntity.extension}"
                 }
 
-                val targetFile = File(parentDir, targetName)
+                val targetFile = CopyFileNamer.nextAvailable(parentDir, originalFile, targetName)
                 val bytes = content.toByteArray(Charsets.UTF_8)
 
                 // Atomic crash-safe write

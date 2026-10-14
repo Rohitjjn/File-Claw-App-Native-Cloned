@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.25, maximum-scale=5.0, user-scalable=yes">
     <script src="jszip.min.js"></script>
     <script src="docx-preview.min.js"></script>
     <style>
@@ -28,9 +28,12 @@
         }
         #output {
             flex: 1;
-            overflow-y: auto;
+            min-width: 0;
+            overflow: auto;
             padding: 16px;
             box-sizing: border-box;
+            touch-action: pan-x pan-y pinch-zoom;
+            -webkit-overflow-scrolling: touch;
         }
         .docx-wrapper {
             background: transparent !important;
@@ -38,8 +41,10 @@
         }
         .docx {
             margin: 0 auto !important;
+            max-width: none;
             box-shadow: 0 4px 16px rgba(0,0,0,0.08) !important;
             border-radius: 8px !important;
+            transform-origin: top center;
         }
         body.dark .docx {
             background-color: #1e1e1d !important;
@@ -74,6 +79,30 @@
     </div>
 
     <script>
+        window.scrollToHeading = function(index, expectedTitle) {
+            var output = document.getElementById('output');
+            if (!output) return;
+            var headings = output.querySelectorAll('h1, h2, h3, h4, h5, h6, [class*="Heading"], [class*="heading"]');
+            var normalize = function(value) {
+                return (value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+            };
+            var wanted = normalize(expectedTitle);
+            var target = null;
+            if (wanted) {
+                for (var i = 0; i < headings.length; i++) {
+                    if (normalize(headings[i].textContent) === wanted) {
+                        target = headings[i];
+                        break;
+                    }
+                }
+            }
+            // Ordinal is a compatibility fallback if the renderer exposes no matching heading text.
+            if (!target) target = headings[index];
+            if (target && typeof target.scrollIntoView === 'function') {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        };
+
         function loadDocx(base64, isDark) {
             if (isDark) {
                 document.body.classList.add('dark');

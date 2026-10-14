@@ -31,10 +31,14 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Image
 import com.example.core.text.PdfTextSearcher
+import com.example.core.text.DocumentOutlineItem
+import com.example.core.text.DocumentOutlineParser
 import com.example.core.text.PdfSearchResult
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Folder
@@ -173,6 +177,12 @@ fun FilePreviewScreen(
     var showJumpDialog by remember { mutableStateOf(false) }
     var showJumpToLineDialog by remember { mutableStateOf(false) }
     var scrollToLineNumber by remember { mutableStateOf<Int?>(null) }
+    var showAppearanceDialog by rememberSaveable { mutableStateOf(false) }
+    var showOutlineSheet by rememberSaveable { mutableStateOf(false) }
+    var markdownOutlineJumpIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var docxOutlineJumpIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var docxOutlineJumpTitle by rememberSaveable { mutableStateOf<String?>(null) }
+    var outlineItems by remember { mutableStateOf<List<DocumentOutlineItem>>(emptyList()) }
 
     var isSearchInDocumentOpen by rememberSaveable { mutableStateOf(false) }
     var inViewerSearchQuery by rememberSaveable { mutableStateOf("") }
@@ -221,6 +231,47 @@ fun FilePreviewScreen(
     }
 
     val context = LocalContext.current
+    val viewerPreferences = remember(context) {
+        context.getSharedPreferences("viewer_appearance", android.content.Context.MODE_PRIVATE)
+    }
+    var appearanceTheme by rememberSaveable {
+        mutableStateOf(viewerPreferences.getString("theme", "Claude Glass") ?: "Claude Glass")
+    }
+    var appearanceFontSize by rememberSaveable {
+        mutableStateOf(viewerPreferences.getInt("font_size_sp", 16).coerceIn(11, 22))
+    }
+
+    val previewView = androidx.compose.ui.platform.LocalView.current
+    val previewWindow = remember(previewView) {
+        var activityContext: android.content.Context? = previewView.context
+        while (activityContext is android.content.ContextWrapper && activityContext !is android.app.Activity) {
+            activityContext = activityContext.baseContext
+        }
+        (activityContext as? android.app.Activity)?.window
+    }
+    DisposableEffect(previewWindow, previewView, isBarsVisible) {
+        val controller = previewWindow?.let { androidx.core.view.WindowInsetsControllerCompat(it, previewView) }
+        controller?.systemBarsBehavior =
+            androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        val systemBars = androidx.core.view.WindowInsetsCompat.Type.systemBars()
+        if (isBarsVisible) controller?.show(systemBars) else controller?.hide(systemBars)
+        onDispose { controller?.show(systemBars) }
+    }
+
+    LaunchedEffect(activeFile?.path) { isBarsVisible = true }
+    LaunchedEffect(activeFile?.path, activeFile?.extension, textContent, totalPdfPages) {
+        val file = activeFile
+        outlineItems = if (file == null) emptyList() else withContext(Dispatchers.IO) {
+            when (file.extension.lowercase()) {
+                "md" -> DocumentOutlineParser.fromMarkdown(textContent)
+                "docx" -> com.example.core.format.DocxExtractor.extractText(File(file.path)).outline
+                "pdf" -> (1..totalPdfPages.coerceAtLeast(0)).map { page ->
+                    DocumentOutlineItem(title = "Page $page", level = 1, targetIndex = page - 1)
+                }
+                else -> emptyList()
+            }
+        }
+    }
 
     // Restore previously opened file state on recreate
     // Attempted once per screen instance (process-death recovery). Without the flag, "Remove from history"
@@ -257,9 +308,10 @@ fun FilePreviewScreen(
     }
 
     androidx.activity.compose.BackHandler {
-        handleBack()
+        if (!isBarsVisible) isBarsVisible = true else handleBack()
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
             androidx.compose.animation.AnimatedVisibility(
@@ -290,8 +342,12 @@ fun FilePreviewScreen(
                             }
                         }
 
+                        val activeExtension = activeFile?.extension?.lowercase().orEmpty()
                         val isTextState = fileState is MainViewModel.FileContentState.TextSuccess ||
-                            (activeFile?.extension?.lowercase() in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv"))
+                            activeExtension in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
+                        val canCustomizeAppearance = activeExtension in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql")
+                        val canShowOutline = activeExtension in setOf("md", "pdf", "docx")
+                        val canUseImmersive = activeExtension in setOf("pdf", "png", "jpg", "jpeg", "webp", "gif", "txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
                         if (isTextState) {
                             IconButton(onClick = {
                                 val textToCopy = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
@@ -307,6 +363,35 @@ fun FilePreviewScreen(
                                     imageVector = Icons.Outlined.ContentCopy,
                                     contentDescription = "Copy all text",
                                     tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        if (canCustomizeAppearance) {
+                            IconButton(onClick = { isWebRenderActive = !isWebRenderActive }) {
+                                Icon(
+                                    imageVector = if (isWebRenderActive) Icons.Outlined.Code else Icons.Outlined.Language,
+                                    contentDescription = if (isWebRenderActive) "Switch to code/text view" else "Switch to rendered preview"
+                                )
+                            }
+                            IconButton(onClick = {
+                                // Route text/Markdown into the native themed reader before opening appearance.
+                                isWebRenderActive = false
+                                showAppearanceDialog = true
+                            }) {
+                                Icon(Icons.Default.Settings, contentDescription = "Appearance")
+                            }
+                        }
+                        if (canShowOutline) {
+                            IconButton(onClick = { showOutlineSheet = true }) {
+                                Icon(Icons.Default.MenuBook, contentDescription = "Document outline")
+                            }
+                        }
+                        if (canUseImmersive) {
+                            IconButton(onClick = { isBarsVisible = !isBarsVisible }) {
+                                Icon(
+                                    imageVector = if (isBarsVisible) Icons.Default.Fullscreen else Icons.Default.FullscreenExit,
+                                    contentDescription = if (isBarsVisible) "Enter immersive focus mode" else "Exit immersive focus mode"
                                 )
                             }
                         }
@@ -957,6 +1042,10 @@ fun FilePreviewScreen(
                                     markdownText = state.content,
                                     fileEntity = state.file,
                                     fontSizeSetting = settings.fontSize,
+                                    appearanceTheme = appearanceTheme,
+                                    appearanceFontSize = appearanceFontSize,
+                                    scrollToHeadingIndex = markdownOutlineJumpIndex,
+                                    onOutlineJumpHandled = { markdownOutlineJumpIndex = null },
                                     modifier = Modifier.fillMaxSize()
                                 )
                             } else {
@@ -964,6 +1053,8 @@ fun FilePreviewScreen(
                                     codeText = state.content,
                                     fileEntity = state.file,
                                     fontSizeSetting = settings.fontSize,
+                                    appearanceTheme = appearanceTheme,
+                                    appearanceFontSize = appearanceFontSize,
                                     wrapSetting = settings.wordWrap,
                                     showLineNumbers = settings.showLineNumbers,
                                     scrollToLine = scrollToLineNumber,
@@ -1035,7 +1126,13 @@ fun FilePreviewScreen(
                             totalPdfPages = total
                         },
                         scrollToPage = scrollToPage,
-                        onScrollProgressHandled = { scrollToPage = null }
+                        onScrollProgressHandled = { scrollToPage = null },
+                        scrollToHeadingIndex = docxOutlineJumpIndex,
+                        scrollToHeadingTitle = docxOutlineJumpTitle,
+                        onOutlineJumpHandled = {
+                            docxOutlineJumpIndex = null
+                            docxOutlineJumpTitle = null
+                        }
                     )
                 }
                 is MainViewModel.FileContentState.PptxSuccess -> {
@@ -1086,12 +1183,171 @@ fun FilePreviewScreen(
         }
     }
 
+        if (!isBarsVisible) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                    shadowElevation = 5.dp,
+                    modifier = Modifier.align(Alignment.TopStart).padding(12.dp)
+                        .clickable { isBarsVisible = true; handleBack() }
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Back", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.68f),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
+                        .clickable { isBarsVisible = true }
+                ) {
+                    Text("Tap to exit focus", fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp))
+                }
+            }
+        }
+    }
+
     // Glassmorphism Modal Bottom Sheet for File Properties
     if (showPropertiesDialog && activeFile != null) {
         com.example.ui.component.FilePropertiesBottomSheet(
             fileEntity = activeFile,
             onDismissRequest = { showPropertiesDialog = false }
         )
+    }
+
+    if (showAppearanceDialog) {
+        AlertDialog(
+            onDismissRequest = { showAppearanceDialog = false },
+            title = { Text("Viewer appearance") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Theme", style = MaterialTheme.typography.labelLarge)
+                    listOf("Claude Glass", "Nord Dark", "Warm Parchment").forEach { theme ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                appearanceTheme = theme
+                                viewerPreferences.edit().putString("theme", theme).apply()
+                            }.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = appearanceTheme == theme,
+                                onClick = {
+                                    appearanceTheme = theme
+                                    viewerPreferences.edit().putString("theme", theme).apply()
+                                }
+                            )
+                            Column {
+                                Text(theme, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    when (theme) {
+                                        "Nord Dark" -> "Cool, low-glare dark palette"
+                                        "Warm Parchment" -> "Soft paper tones"
+                                        else -> "Adaptive, warm glass"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column {
+                            Text("Font size", style = MaterialTheme.typography.labelLarge)
+                            Text("$appearanceFontSize sp", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedButton(
+                                enabled = appearanceFontSize > 11,
+                                onClick = {
+                                    appearanceFontSize = (appearanceFontSize - 1).coerceAtLeast(11)
+                                    viewerPreferences.edit().putInt("font_size_sp", appearanceFontSize).apply()
+                                },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                            ) { Text("−") }
+                            Spacer(Modifier.width(8.dp))
+                            OutlinedButton(
+                                enabled = appearanceFontSize < 22,
+                                onClick = {
+                                    appearanceFontSize = (appearanceFontSize + 1).coerceAtMost(22)
+                                    viewerPreferences.edit().putInt("font_size_sp", appearanceFontSize).apply()
+                                },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                            ) { Text("+") }
+                        }
+                    }
+                    Text("Saved automatically • 11–22 sp", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showAppearanceDialog = false }) { Text("Done") } }
+        )
+    }
+
+    if (showOutlineSheet) {
+        ModalBottomSheet(onDismissRequest = { showOutlineSheet = false }) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+                Text("Outline / Table of contents", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                val outlineExtension = activeFile?.extension?.lowercase().orEmpty()
+                if (outlineItems.isEmpty()) {
+                    Text(
+                        text = when (outlineExtension) {
+                            "md" -> "No Markdown headings found. Use #, ##, or ### headings to create an outline."
+                            "docx" -> "No Word heading styles found. Apply Heading 1–6 styles in Word to create an outline."
+                            "pdf" -> "PDF pages are loading, or the document has no readable pages."
+                            else -> "No outline available."
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 18.dp)
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
+                        itemsIndexed(outlineItems) { _, item ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    when (outlineExtension) {
+                                        "md" -> {
+                                            isWebRenderActive = false
+                                            markdownOutlineJumpIndex = item.targetIndex
+                                        }
+                                        "docx" -> {
+                                            docxOutlineJumpIndex = item.targetIndex
+                                            docxOutlineJumpTitle = item.title
+                                        }
+                                        "pdf" -> scrollToPage = item.targetIndex
+                                    }
+                                    showOutlineSheet = false
+                                }.padding(
+                                    start = ((item.level - 1).coerceIn(0, 5) * 12).dp,
+                                    end = 8.dp, top = 11.dp, bottom = 11.dp
+                                ),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(17.dp),
+                                    tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(10.dp))
+                                Text(item.title, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
+            }
+        }
     }
 
     if (showJumpToLineDialog) {
@@ -1229,13 +1485,28 @@ fun MarkdownPreview(
     markdownText: String,
     fileEntity: RecentFileEntity,
     fontSizeSetting: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    appearanceTheme: String = "Claude Glass",
+    appearanceFontSize: Int? = null,
+    scrollToHeadingIndex: Int? = null,
+    onOutlineJumpHandled: () -> Unit = {}
 ) {
     val isNightMode = androidx.compose.foundation.isSystemInDarkTheme()
-    var generatedHtml by remember(markdownText, isNightMode, fontSizeSetting) { mutableStateOf<String?>(null) }
-    var isWebViewLoading by remember(markdownText) { mutableStateOf(true) }
+    var generatedHtml by remember(markdownText, isNightMode, fontSizeSetting, appearanceTheme, appearanceFontSize) { mutableStateOf<String?>(null) }
+    var isWebViewLoading by remember(markdownText, appearanceTheme, appearanceFontSize) { mutableStateOf(true) }
+    var markdownWebViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
 
-    LaunchedEffect(markdownText, isNightMode, fontSizeSetting) {
+    LaunchedEffect(scrollToHeadingIndex, markdownWebViewRef, isWebViewLoading) {
+        if (scrollToHeadingIndex != null && markdownWebViewRef != null && !isWebViewLoading) {
+            markdownWebViewRef?.evaluateJavascript(
+                "if (typeof window.scrollToOutline === 'function') { window.scrollToOutline($scrollToHeadingIndex); }",
+                null
+            )
+            onOutlineJumpHandled()
+        }
+    }
+
+    LaunchedEffect(markdownText, isNightMode, fontSizeSetting, appearanceTheme, appearanceFontSize) {
         val htmlContent = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             val parser = org.intellij.markdown.parser.MarkdownParser(org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor())
             val parsedTree = parser.buildMarkdownTreeFromString(markdownText)
@@ -1243,32 +1514,41 @@ fun MarkdownPreview(
                 org.intellij.markdown.html.HtmlGenerator(markdownText, parsedTree, org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor()).generateHtml(),
                 keepImages = true
             )
-
-            val fontSize = when (fontSizeSetting) {
-                "Small" -> "14px"
-                "Large" -> "20px"
-                else -> "16px"
+            var headingOrdinal = 0
+            val outlinedHtml = rawHtml.replace(Regex("<h([1-6])([^>]*)>")) { match ->
+                val ordinal = headingOrdinal++
+                val attrs = match.groupValues[2]
+                if (Regex("\\bdata-fileclaw-outline-index\\s*=").containsMatchIn(attrs)) match.value
+                else "<h" + match.groupValues[1] + attrs + " data-fileclaw-outline-index=\"" + ordinal + "\">"
             }
 
+            val fontSize = (appearanceFontSize ?: when (fontSizeSetting) {
+                "Small" -> 14
+                "Large" -> 20
+                else -> 16
+            }).coerceIn(11, 22).toString() + "px"
+            val nord = appearanceTheme == "Nord Dark"
+            val parchment = appearanceTheme == "Warm Parchment"
+
             // Claude Theme Colors (EXACT from File Claw - MD Preview Theme Fix Prompt)
-            val bgColor = if (isNightMode) "#151514" else "#faf9f5" // canvas
-            val textPrimary = if (isNightMode) "#f5f5f3" else "#141413" // ink
-            val textBody = if (isNightMode) "#d1cfc7" else "#3d3d3a" // body
-            val textBodyStrong = if (isNightMode) "#faf9f5" else "#252523" // body_strong
-            val textSecondary = if (isNightMode) "#a39f93" else "#6c6a64" // muted
-            val textSecondarySoft = if (isNightMode) "#8e8779" else "#8e8b82" // muted_soft
-            val accent = if (isNightMode) "#e08567" else "#cc785c" // primary (coral)
-            val accentActive = if (isNightMode) "#f09a7d" else "#a9583e" // primary_active
-            val border = if (isNightMode) "#2d2b28" else "#e6dfd8" // hairline
-            val borderSoft = if (isNightMode) "#211f1d" else "#ebe6df" // hairline_soft
-            val cardBg = if (isNightMode) "#2a2723" else "#efe9de" // surface_card
-            val quoteBg = if (isNightMode) "#1c1a18" else "#f5f0e8" // surface_soft
-            val inlineCodeBg = if (isNightMode) "#2d2823" else "#e8e0d2" // surface_cream_strong
-            val codeBlockOuterBg = if (isNightMode) "#0d0d0c" else "#181715" // surface_dark
-            val codeBlockInnerBg = if (isNightMode) "#161513" else "#1f1e1b" // surface_dark_soft
-            val codeBlockHeaderBg = if (isNightMode) "#1d1b19" else "#252320" // surface_dark_elevated
-            val codeBlockText = if (isNightMode) "#f5f5f3" else "#faf9f5" // on_dark
-            val codeBlockButtons = if (isNightMode) "#a09d96" else "#8e8b82" // on_dark_soft
+            val bgColor = when { nord -> "#2e3440"; parchment -> "#f4ecd8"; isNightMode -> "#151514"; else -> "#faf9f5" } // canvas
+            val textPrimary = when { nord -> "#eceff4"; parchment -> "#29261f"; isNightMode -> "#f5f5f3"; else -> "#141413" } // ink
+            val textBody = when { nord -> "#d8dee9"; parchment -> "#40392f"; isNightMode -> "#d1cfc7"; else -> "#3d3d3a" } // body
+            val textBodyStrong = when { nord -> "#eceff4"; parchment -> "#332d24"; isNightMode -> "#faf9f5"; else -> "#252523" } // body_strong
+            val textSecondary = when { nord -> "#aab4c5"; parchment -> "#756b5b"; isNightMode -> "#a39f93"; else -> "#6c6a64" } // muted
+            val textSecondarySoft = when { nord -> "#9aa7bd"; parchment -> "#8a7c66"; isNightMode -> "#8e8779"; else -> "#8e8b82" } // muted_soft
+            val accent = when { nord -> "#88c0d0"; parchment -> "#a85f3e"; isNightMode -> "#e08567"; else -> "#cc785c" } // primary (coral)
+            val accentActive = when { nord -> "#8fbcbb"; parchment -> "#8e4e32"; isNightMode -> "#f09a7d"; else -> "#a9583e" } // primary_active
+            val border = when { nord -> "#434c5e"; parchment -> "#d8ccb2"; isNightMode -> "#2d2b28"; else -> "#e6dfd8" } // hairline
+            val borderSoft = when { nord -> "#3b4252"; parchment -> "#e7dcc5"; isNightMode -> "#211f1d"; else -> "#ebe6df" } // hairline_soft
+            val cardBg = when { nord -> "#3b4252"; parchment -> "#eadfc7"; isNightMode -> "#2a2723"; else -> "#efe9de" } // surface_card
+            val quoteBg = when { nord -> "#343c4d"; parchment -> "#ede2cb"; isNightMode -> "#1c1a18"; else -> "#f5f0e8" } // surface_soft
+            val inlineCodeBg = when { nord -> "#434c5e"; parchment -> "#e6d8b9"; isNightMode -> "#2d2823"; else -> "#e8e0d2" } // surface_cream_strong
+            val codeBlockOuterBg = when { nord -> "#242933"; parchment -> "#292722"; isNightMode -> "#0d0d0c"; else -> "#181715" } // surface_dark
+            val codeBlockInnerBg = when { nord -> "#2e3440"; parchment -> "#34302a"; isNightMode -> "#161513"; else -> "#1f1e1b" } // surface_dark_soft
+            val codeBlockHeaderBg = when { nord -> "#3b4252"; parchment -> "#413a30"; isNightMode -> "#1d1b19"; else -> "#252320" } // surface_dark_elevated
+            val codeBlockText = when { nord -> "#eceff4"; parchment -> "#f4ecd8"; isNightMode -> "#f5f5f3"; else -> "#faf9f5" } // on_dark
+            val codeBlockButtons = when { nord -> "#aab4c5"; parchment -> "#c7bba2"; isNightMode -> "#a09d96"; else -> "#8e8b82" } // on_dark_soft
 
             """
             <!DOCTYPE html>
@@ -1393,7 +1673,7 @@ fun MarkdownPreview(
                         background-color: transparent;
                         color: var(--code-text);
                         padding: 0;
-                        font-size: 14px;
+                        font-size: $fontSize;
                         line-height: 1.6;
                     }
                     blockquote {
@@ -1438,6 +1718,10 @@ fun MarkdownPreview(
                     }
                 </style>
                 <script>
+                    window.scrollToOutline = function(index) {
+                        var target = document.querySelector('[data-fileclaw-outline-index="' + index + '"]');
+                        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    };
                     function copyCode(btn, codeId) {
                         var codeText = document.getElementById(codeId).innerText;
                         if(window.Android) {
@@ -1495,7 +1779,7 @@ fun MarkdownPreview(
                 </script>
             </head>
             <body>
-                $rawHtml
+                $outlinedHtml
             </body>
             </html>
             """.trimIndent()
@@ -1521,6 +1805,8 @@ fun MarkdownPreview(
                         }
                         setBackgroundColor(if (isNightMode) 0xFF151514.toInt() else 0xFFfaf9f5.toInt())
                         setInitialScale(0)
+                        markdownWebViewRef = this
+                        tag = generatedHtml
                         addJavascriptInterface(WebAppInterface(context), "Android")
                         
                         webViewClient = object : android.webkit.WebViewClient() {
@@ -1533,7 +1819,11 @@ fun MarkdownPreview(
                     }
                 },
                 update = { webView ->
-                    // No-op
+                    markdownWebViewRef = webView
+                    if (webView.tag != generatedHtml) {
+                        webView.tag = generatedHtml
+                        webView.loadDataWithBaseURL(null, generatedHtml!!, "text/html", "UTF-8", null)
+                    }
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -1573,7 +1863,9 @@ fun CodePreview(
     showLineNumbers: Boolean,
     modifier: Modifier = Modifier,
     scrollToLine: Int? = null,
-    onScrollToLineHandled: () -> Unit = {}
+    onScrollToLineHandled: () -> Unit = {},
+    appearanceTheme: String = "Claude Glass",
+    appearanceFontSize: Int? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -1655,18 +1947,30 @@ fun CodePreview(
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surface)
         ) {
-            val htmlContent = remember(codeText, isDark, fontSizeSetting, wrapSetting, showLineNumbers) {
+            val htmlContent = remember(codeText, isDark, fontSizeSetting, appearanceTheme, appearanceFontSize, wrapSetting, showLineNumbers) {
                 val escapedCode = codeText.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                val bgColor = if (isDark) "#1e1e1e" else "#ffffff"
-                val textColor = if (isDark) "#d4d4d4" else "#000000"
-                val fSize = when (fontSizeSetting) {
-                    "Small" -> "12px"
-                    "Large" -> "18px"
-                    else -> "14px"
+                val bgColor = when (appearanceTheme) {
+                    "Nord Dark" -> "#2e3440"
+                    "Warm Parchment" -> "#f4ecd8"
+                    else -> if (isDark) "#151514" else "#faf9f5"
                 }
+                val textColor = when (appearanceTheme) {
+                    "Nord Dark" -> "#d8dee9"
+                    "Warm Parchment" -> "#40392f"
+                    else -> if (isDark) "#d1cfc7" else "#3d3d3a"
+                }
+                val fSize = (appearanceFontSize ?: when (fontSizeSetting) {
+                    "Small" -> 12
+                    "Large" -> 18
+                    else -> 14
+                }).coerceIn(11, 22).toString() + "px"
                 val wWrap = if (wrapSetting) "pre-wrap" else "pre"
                 val wWord = if (wrapSetting) "break-word" else "normal"
-                val theme = if (isDark) "vs2015.min.css" else "vs.min.css"
+                val theme = when (appearanceTheme) {
+                    "Nord Dark" -> "nord.min.css"
+                    "Warm Parchment" -> "vs.min.css"
+                    else -> if (isDark) "vs2015.min.css" else "vs.min.css"
+                }
                 
                 val lineNumbersCss = if (showLineNumbers) """
                     .hljs {
@@ -1722,6 +2026,7 @@ fun CodePreview(
                     word-wrap: $wWord;
                     font-family: monospace;
                   }
+                  pre, code { font-size: $fSize !important; line-height: 1.55; }
                   $lineNumbersCss
                 </style>
                 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/$theme">
@@ -1762,7 +2067,10 @@ fun CodePreview(
                 },
                 update = { webView ->
                     webViewRef = webView
-                    webView.loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
+                    if (webView.tag != htmlContent) {
+                        webView.tag = htmlContent
+                        webView.loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
+                    }
                 }
             )
         }
@@ -3334,7 +3642,10 @@ fun DocxPreviewWebView(
     modifier: Modifier = Modifier,
     onPageChanged: (Int, Int) -> Unit = { _, _ -> },
     scrollToPage: Int? = null,
-    onScrollProgressHandled: () -> Unit = {}
+    onScrollProgressHandled: () -> Unit = {},
+    scrollToHeadingIndex: Int? = null,
+    scrollToHeadingTitle: String? = null,
+    onOutlineJumpHandled: () -> Unit = {}
 ) {
     var isWebViewLoading by remember(base64Docx) { mutableStateOf(true) }
     var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
@@ -3342,11 +3653,21 @@ fun DocxPreviewWebView(
     
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    LaunchedEffect(scrollToPage) {
-        if (scrollToPage != null) {
+    LaunchedEffect(scrollToPage, webViewRef) {
+        if (scrollToPage != null && webViewRef != null) {
             val pageNum = scrollToPage + 1
             webViewRef?.evaluateJavascript("if (typeof window.scrollToPage === 'function') { window.scrollToPage($pageNum); }", null)
             onScrollProgressHandled()
+        }
+    }
+    LaunchedEffect(scrollToHeadingIndex, scrollToHeadingTitle, webViewRef, isWebViewLoading) {
+        if (scrollToHeadingIndex != null && webViewRef != null && !isWebViewLoading) {
+            val escapedTitle = org.json.JSONObject.quote(scrollToHeadingTitle.orEmpty())
+            webViewRef?.evaluateJavascript(
+                "if (typeof window.scrollToHeading === 'function') { window.scrollToHeading($scrollToHeadingIndex, $escapedTitle); }",
+                null
+            )
+            onOutlineJumpHandled()
         }
     }
 
