@@ -1037,6 +1037,10 @@ fun FilePreviewScreen(
                                     markdownText = state.content,
                                     fileEntity = state.file,
                                     fontSizeSetting = settings.fontSize,
+                                    appearanceTheme = appearanceTheme,
+                                    appearanceFontSize = appearanceFontSize,
+                                    scrollToHeadingIndex = markdownOutlineJumpIndex,
+                                    onOutlineJumpHandled = { markdownOutlineJumpIndex = null },
                                     modifier = Modifier.fillMaxSize()
                                 )
                             } else {
@@ -1044,6 +1048,8 @@ fun FilePreviewScreen(
                                     codeText = state.content,
                                     fileEntity = state.file,
                                     fontSizeSetting = settings.fontSize,
+                                    appearanceTheme = appearanceTheme,
+                                    appearanceFontSize = appearanceFontSize,
                                     wrapSetting = settings.wordWrap,
                                     showLineNumbers = settings.showLineNumbers,
                                     scrollToLine = scrollToLineNumber,
@@ -1115,7 +1121,9 @@ fun FilePreviewScreen(
                             totalPdfPages = total
                         },
                         scrollToPage = scrollToPage,
-                        onScrollProgressHandled = { scrollToPage = null }
+                        onScrollProgressHandled = { scrollToPage = null },
+                        scrollToHeadingIndex = docxOutlineJumpIndex,
+                        onOutlineJumpHandled = { docxOutlineJumpIndex = null }
                     )
                 }
                 is MainViewModel.FileContentState.PptxSuccess -> {
@@ -1203,6 +1211,128 @@ fun FilePreviewScreen(
             fileEntity = activeFile,
             onDismissRequest = { showPropertiesDialog = false }
         )
+    }
+
+    if (showAppearanceDialog) {
+        AlertDialog(
+            onDismissRequest = { showAppearanceDialog = false },
+            title = { Text("Viewer appearance") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Theme", style = MaterialTheme.typography.labelLarge)
+                    listOf("Claude Glass", "Nord Dark", "Warm Parchment").forEach { theme ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                appearanceTheme = theme
+                                viewerPreferences.edit().putString("theme", theme).apply()
+                            }.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = appearanceTheme == theme,
+                                onClick = {
+                                    appearanceTheme = theme
+                                    viewerPreferences.edit().putString("theme", theme).apply()
+                                }
+                            )
+                            Column {
+                                Text(theme, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    when (theme) {
+                                        "Nord Dark" -> "Cool, low-glare dark palette"
+                                        "Warm Parchment" -> "Soft paper tones"
+                                        else -> "Adaptive, warm glass"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column {
+                            Text("Font size", style = MaterialTheme.typography.labelLarge)
+                            Text("$appearanceFontSize sp", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedButton(
+                                enabled = appearanceFontSize > 11,
+                                onClick = {
+                                    appearanceFontSize = (appearanceFontSize - 1).coerceAtLeast(11)
+                                    viewerPreferences.edit().putInt("font_size_sp", appearanceFontSize).apply()
+                                },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                            ) { Text("−") }
+                            Spacer(Modifier.width(8.dp))
+                            OutlinedButton(
+                                enabled = appearanceFontSize < 22,
+                                onClick = {
+                                    appearanceFontSize = (appearanceFontSize + 1).coerceAtMost(22)
+                                    viewerPreferences.edit().putInt("font_size_sp", appearanceFontSize).apply()
+                                },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                            ) { Text("+") }
+                        }
+                    }
+                    Text("Saved automatically • 11–22 sp", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showAppearanceDialog = false }) { Text("Done") } }
+        )
+    }
+
+    if (showOutlineSheet) {
+        ModalBottomSheet(onDismissRequest = { showOutlineSheet = false }) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+                Text("Outline / Table of contents", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                val outlineExtension = activeFile?.extension?.lowercase().orEmpty()
+                if (outlineItems.isEmpty()) {
+                    Text(
+                        text = when (outlineExtension) {
+                            "md" -> "No Markdown headings found. Use #, ##, or ### headings to create an outline."
+                            "docx" -> "No Word heading styles found. Apply Heading 1–6 styles in Word to create an outline."
+                            "pdf" -> "PDF pages are loading, or the document has no readable pages."
+                            else -> "No outline available."
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 18.dp)
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
+                        itemsIndexed(outlineItems) { _, item ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    when (outlineExtension) {
+                                        "md" -> markdownOutlineJumpIndex = item.targetIndex
+                                        "docx" -> docxOutlineJumpIndex = item.targetIndex
+                                        "pdf" -> scrollToPage = item.targetIndex
+                                    }
+                                    showOutlineSheet = false
+                                }.padding(
+                                    start = ((item.level - 1).coerceIn(0, 5) * 12).dp,
+                                    end = 8.dp, top = 11.dp, bottom = 11.dp
+                                ),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(17.dp),
+                                    tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(10.dp))
+                                Text(item.title, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
+            }
+        }
     }
 
     if (showJumpToLineDialog) {
