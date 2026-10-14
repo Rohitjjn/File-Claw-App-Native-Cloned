@@ -1658,7 +1658,7 @@ fun MarkdownPreview(
                         background-color: transparent;
                         color: var(--code-text);
                         padding: 0;
-                        font-size: 14px;
+                        font-size: $fontSize;
                         line-height: 1.6;
                     }
                     blockquote {
@@ -1790,6 +1790,8 @@ fun MarkdownPreview(
                         }
                         setBackgroundColor(if (isNightMode) 0xFF151514.toInt() else 0xFFfaf9f5.toInt())
                         setInitialScale(0)
+                        markdownWebViewRef = this
+                        tag = generatedHtml
                         addJavascriptInterface(WebAppInterface(context), "Android")
                         
                         webViewClient = object : android.webkit.WebViewClient() {
@@ -1838,6 +1840,8 @@ fun CodePreview(
     codeText: String,
     fileEntity: RecentFileEntity,
     fontSizeSetting: String,
+    appearanceTheme: String = "Claude Glass",
+    appearanceFontSize: Int? = null,
     wrapSetting: Boolean,
     showLineNumbers: Boolean,
     modifier: Modifier = Modifier,
@@ -1924,18 +1928,30 @@ fun CodePreview(
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surface)
         ) {
-            val htmlContent = remember(codeText, isDark, fontSizeSetting, wrapSetting, showLineNumbers) {
+            val htmlContent = remember(codeText, isDark, fontSizeSetting, appearanceTheme, appearanceFontSize, wrapSetting, showLineNumbers) {
                 val escapedCode = codeText.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                val bgColor = if (isDark) "#1e1e1e" else "#ffffff"
-                val textColor = if (isDark) "#d4d4d4" else "#000000"
-                val fSize = when (fontSizeSetting) {
-                    "Small" -> "12px"
-                    "Large" -> "18px"
-                    else -> "14px"
+                val bgColor = when (appearanceTheme) {
+                    "Nord Dark" -> "#2e3440"
+                    "Warm Parchment" -> "#f4ecd8"
+                    else -> if (isDark) "#151514" else "#faf9f5"
                 }
+                val textColor = when (appearanceTheme) {
+                    "Nord Dark" -> "#d8dee9"
+                    "Warm Parchment" -> "#40392f"
+                    else -> if (isDark) "#d1cfc7" else "#3d3d3a"
+                }
+                val fSize = (appearanceFontSize ?: when (fontSizeSetting) {
+                    "Small" -> 12
+                    "Large" -> 18
+                    else -> 14
+                }).coerceIn(11, 22).toString() + "px"
                 val wWrap = if (wrapSetting) "pre-wrap" else "pre"
                 val wWord = if (wrapSetting) "break-word" else "normal"
-                val theme = if (isDark) "vs2015.min.css" else "vs.min.css"
+                val theme = when (appearanceTheme) {
+                    "Nord Dark" -> "nord.min.css"
+                    "Warm Parchment" -> "vs.min.css"
+                    else -> if (isDark) "vs2015.min.css" else "vs.min.css"
+                }
                 
                 val lineNumbersCss = if (showLineNumbers) """
                     .hljs {
@@ -1991,6 +2007,7 @@ fun CodePreview(
                     word-wrap: $wWord;
                     font-family: monospace;
                   }
+                  pre, code { font-size: $fSize !important; line-height: 1.55; }
                   $lineNumbersCss
                 </style>
                 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/$theme">
@@ -2031,7 +2048,10 @@ fun CodePreview(
                 },
                 update = { webView ->
                     webViewRef = webView
-                    webView.loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
+                    if (webView.tag != htmlContent) {
+                        webView.tag = htmlContent
+                        webView.loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
+                    }
                 }
             )
         }
@@ -3603,7 +3623,9 @@ fun DocxPreviewWebView(
     modifier: Modifier = Modifier,
     onPageChanged: (Int, Int) -> Unit = { _, _ -> },
     scrollToPage: Int? = null,
-    onScrollProgressHandled: () -> Unit = {}
+    onScrollProgressHandled: () -> Unit = {},
+    scrollToHeadingIndex: Int? = null,
+    onOutlineJumpHandled: () -> Unit = {}
 ) {
     var isWebViewLoading by remember(base64Docx) { mutableStateOf(true) }
     var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
@@ -3611,11 +3633,20 @@ fun DocxPreviewWebView(
     
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    LaunchedEffect(scrollToPage) {
-        if (scrollToPage != null) {
+    LaunchedEffect(scrollToPage, webViewRef) {
+        if (scrollToPage != null && webViewRef != null) {
             val pageNum = scrollToPage + 1
             webViewRef?.evaluateJavascript("if (typeof window.scrollToPage === 'function') { window.scrollToPage($pageNum); }", null)
             onScrollProgressHandled()
+        }
+    }
+    LaunchedEffect(scrollToHeadingIndex, webViewRef) {
+        if (scrollToHeadingIndex != null && webViewRef != null) {
+            webViewRef?.evaluateJavascript(
+                "if (typeof window.scrollToHeading === 'function') { window.scrollToHeading($scrollToHeadingIndex); }",
+                null
+            )
+            onOutlineJumpHandled()
         }
     }
 
