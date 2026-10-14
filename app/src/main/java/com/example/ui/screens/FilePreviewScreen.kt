@@ -1488,8 +1488,8 @@ fun MarkdownPreview(
     var isWebViewLoading by remember(markdownText, appearanceTheme, appearanceFontSize) { mutableStateOf(true) }
     var markdownWebViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
 
-    LaunchedEffect(scrollToHeadingIndex, markdownWebViewRef) {
-        if (scrollToHeadingIndex != null && markdownWebViewRef != null) {
+    LaunchedEffect(scrollToHeadingIndex, markdownWebViewRef, isWebViewLoading) {
+        if (scrollToHeadingIndex != null && markdownWebViewRef != null && !isWebViewLoading) {
             markdownWebViewRef?.evaluateJavascript(
                 "if (typeof window.scrollToOutline === 'function') { window.scrollToOutline($scrollToHeadingIndex); }",
                 null
@@ -3651,8 +3651,8 @@ fun DocxPreviewWebView(
             onScrollProgressHandled()
         }
     }
-    LaunchedEffect(scrollToHeadingIndex, webViewRef) {
-        if (scrollToHeadingIndex != null && webViewRef != null) {
+    LaunchedEffect(scrollToHeadingIndex, webViewRef, isWebViewLoading) {
+        if (scrollToHeadingIndex != null && webViewRef != null && !isWebViewLoading) {
             webViewRef?.evaluateJavascript(
                 "if (typeof window.scrollToHeading === 'function') { window.scrollToHeading($scrollToHeadingIndex); }",
                 null
