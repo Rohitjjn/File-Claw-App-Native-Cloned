@@ -3609,18 +3609,31 @@ fun formatSimpleMarkdownToHtml(mdText: String): String {
     val htmlBuilder = StringBuilder()
     var inList = false
     var inCodeBlock = false
+    var codeBlockLanguage = "Code"
+    var codeBlockIndex = 0
     val codeBlockContent = StringBuilder()
 
+    fun appendCodeBlock() {
+        appendCopyableCodeBlock(
+            htmlBuilder,
+            "fileclaw-md-code-$codeBlockIndex",
+            codeBlockLanguage,
+            codeBlockContent.toString()
+        )
+        codeBlockIndex++
+        codeBlockContent.clear()
+    }
+
     for (line in lines) {
-        if (line.trim().startsWith("```")) {
+        val fence = line.trim()
+        if (fence.startsWith("\u0060\u0060\u0060")) {
             if (inCodeBlock) {
-                htmlBuilder.append("<pre><code>")
-                htmlBuilder.append(escapeHtml(codeBlockContent.toString()))
-                htmlBuilder.append("</code></pre>\n")
-                codeBlockContent.clear()
+                appendCodeBlock()
                 inCodeBlock = false
+                codeBlockLanguage = "Code"
             } else {
                 inCodeBlock = true
+                codeBlockLanguage = fence.removePrefix("\u0060\u0060\u0060").trim().substringBefore(" ").ifBlank { "Code" }
             }
             continue
         }
@@ -3631,67 +3644,138 @@ fun formatSimpleMarkdownToHtml(mdText: String): String {
         }
 
         val trimmed = line.trim()
-        
-        // Handle list items
         val listStart = trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("+ ")
         if (listStart) {
             if (!inList) {
                 htmlBuilder.append("<ul>\n")
                 inList = true
             }
-            val content = trimmed.substring(2)
-            htmlBuilder.append("<li>").append(formatInlineMarkdownToHtml(content)).append("</li>\n")
+            htmlBuilder.append("<li>").append(formatInlineMarkdownToHtml(trimmed.substring(2))).append("</li>\n")
             continue
-        } else {
-            if (inList) {
-                htmlBuilder.append("</ul>\n")
-                inList = false
-            }
+        } else if (inList) {
+            htmlBuilder.append("</ul>\n")
+            inList = false
         }
 
-        // Handle headings
         if (trimmed.startsWith("#")) {
             val level = trimmed.takeWhile { it == '#' }.length
             if (level in 1..6 && trimmed.getOrNull(level) == ' ') {
-                val content = trimmed.substring(level + 1)
-                htmlBuilder.append("<h$level>").append(formatInlineMarkdownToHtml(content)).append("</h$level>\n")
+                htmlBuilder.append("<h$level>")
+                    .append(formatInlineMarkdownToHtml(trimmed.substring(level + 1)))
+                    .append("</h$level>\n")
                 continue
             }
         }
 
-        // Handle horizontal rules
         if (trimmed == "---" || trimmed == "***" || trimmed == "___") {
             htmlBuilder.append("<hr/>\n")
             continue
         }
-
-        // Handle blockquotes
         if (trimmed.startsWith(">")) {
-            val content = trimmed.substring(1).trim()
-            htmlBuilder.append("<blockquote>").append(formatInlineMarkdownToHtml(content)).append("</blockquote>\n")
+            htmlBuilder.append("<blockquote>")
+                .append(formatInlineMarkdownToHtml(trimmed.substring(1).trim()))
+                .append("</blockquote>\n")
             continue
         }
-
-        // Empty lines
-        if (trimmed.isEmpty()) {
-            continue
+        if (trimmed.isNotEmpty()) {
+            htmlBuilder.append("<p>").append(formatInlineMarkdownToHtml(line)).append("</p>\n")
         }
-
-        // Default to paragraph
-        htmlBuilder.append("<p>").append(formatInlineMarkdownToHtml(line)).append("</p>\n")
     }
 
-    if (inList) {
-        htmlBuilder.append("</ul>\n")
-    }
-    if (inCodeBlock) {
-        htmlBuilder.append("<pre><code>")
-        htmlBuilder.append(escapeHtml(codeBlockContent.toString()))
-        htmlBuilder.append("</code></pre>\n")
-    }
-
+    if (inList) htmlBuilder.append("</ul>\n")
+    if (inCodeBlock) appendCodeBlock()
     return htmlBuilder.toString()
 }
+
+/** Render regular TXT prose and fenced code as readable text plus independent copyable blocks. */
+fun formatFencedTextToHtml(text: String): String {
+    val lines = text.lines()
+    val html = StringBuilder()
+    val plainText = StringBuilder()
+    val codeText = StringBuilder()
+    var inCode = false
+    var language = "Code"
+    var codeIndex = 0
+
+    fun flushPlainText() {
+        if (plainText.isNotEmpty()) {
+            html.append("<pre class=\"plain-text\">")
+                .append(escapeHtml(plainText.toString()))
+                .append("</pre>")
+            plainText.clear()
+        }
+    }
+
+    fun flushCode() {
+        appendCopyableCodeBlock(html, "fileclaw-txt-code-$codeIndex", language, codeText.toString())
+        codeIndex++
+        codeText.clear()
+    }
+
+    lines.forEachIndexed { index, line ->
+        val trimmed = line.trim()
+        if (trimmed.startsWith("\u0060\u0060\u0060")) {
+            if (inCode) {
+                flushCode()
+                inCode = false
+                language = "Code"
+            } else {
+                flushPlainText()
+                inCode = true
+                language = trimmed.removePrefix("\u0060\u0060\u0060").trim().substringBefore(" ").ifBlank { "Code" }
+            }
+        } else if (inCode) {
+            codeText.append(line)
+            if (index < lines.lastIndex) codeText.append("\n")
+        } else {
+            plainText.append(line)
+            if (index < lines.lastIndex) plainText.append("\n")
+        }
+    }
+
+    if (inCode) flushCode() else flushPlainText()
+    return html.toString()
+}
+
+private fun appendCopyableCodeBlock(output: StringBuilder, codeId: String, language: String, code: String) {
+    output.append("<section class=\"code-block-container\">")
+        .append("<header class=\"code-header\"><span class=\"code-language\">")
+        .append(escapeHtml(language))
+        .append("</span><button class=\"copy-btn\" type=\"button\" onclick=\"copyCode('")
+        .append(codeId)
+        .append("')\">Copy code</button></header><pre><code id=\"")
+        .append(codeId)
+        .append("\">")
+        .append(escapeHtml(code))
+        .append("</code></pre></section>")
+}
+
+private fun copyCodePreviewStyles(dark: Boolean): String {
+    val surface = if (dark) "#252320" else "#efe9de"
+    val codeSurface = if (dark) "#181715" else "#f7f4ed"
+    val border = if (dark) "#403c36" else "#ded6c8"
+    val ink = if (dark) "#f5f5f3" else "#292722"
+    val muted = if (dark) "#c7bba2" else "#6c6254"
+    val accent = if (dark) "#e8a55a" else "#b76343"
+    return """
+        .code-block-container { margin: 16px 0; border: 1px solid $border; border-radius: 12px; overflow: hidden; }
+        .code-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; background:$surface; }
+        .code-language { color:$muted; font-size:12px; font-family:monospace; text-transform:uppercase; }
+        .copy-btn { border:1px solid $border; background:transparent; color:$accent; border-radius:8px; padding:6px 10px; font-weight:600; }
+        .code-block-container pre { background:$codeSurface; margin:0; padding:12px; overflow-x:auto; white-space:pre; }
+        .code-block-container code { background:transparent; color:$ink; padding:0; border-radius:0; font-family:ui-monospace,monospace; }
+        .plain-text { white-space:pre-wrap; overflow-wrap:anywhere; font:14px/1.65 ui-monospace,monospace; margin:0; }
+    """.trimIndent()
+}
+
+private fun copyCodePreviewScript(): String = """
+    function copyCode(id) {
+        var code = document.getElementById(id);
+        if (code && window.Android && window.Android.copyToClipboard) {
+            window.Android.copyToClipboard(code.innerText || code.textContent || '');
+        }
+    }
+""".trimIndent()
 
 fun escapeHtml(text: String): String {
     return text.replace("&", "&amp;")
