@@ -189,20 +189,32 @@ fun FilePreviewScreen(
     var currentMatchIndex by remember { mutableStateOf(0) }
     var totalMatchesCount by remember { mutableStateOf(0) }
     var pdfSearchResults by remember { mutableStateOf<List<PdfSearchResult>>(emptyList()) }
+    var searchNavigationToken by remember { mutableStateOf(0) }
+    var searchNavigationForward by remember { mutableStateOf(true) }
+    var printRequested by remember { mutableStateOf(false) }
+    var docxSearchContent by remember(activeFile?.path) { mutableStateOf("") }
+    val searchContext = LocalContext.current
 
-    // PDF search effect
+    LaunchedEffect(activeFile?.path, fileState is MainViewModel.FileContentState.DocxSuccess) {
+        val docxFile = activeFile?.takeIf { fileState is MainViewModel.FileContentState.DocxSuccess }
+        docxSearchContent = if (docxFile == null) "" else withContext(Dispatchers.IO) {
+            runCatching { com.example.core.format.DocxExtractor.extractText(File(docxFile.path)).plainText }
+                .getOrDefault("")
+        }
+    }
+
+    // PDFBox extracts actual page text so search hits jump to physical pages, not stream ordinals.
     LaunchedEffect(inViewerSearchQuery, activeFile?.path, fileState) {
-        if (fileState is MainViewModel.FileContentState.PdfSuccess && inViewerSearchQuery.length >= 2 && activeFile != null) {
-            val file = java.io.File(activeFile.path)
-            val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                PdfTextSearcher.searchInPdf(file, inViewerSearchQuery)
+        if (fileState is MainViewModel.FileContentState.PdfSuccess &&
+            inViewerSearchQuery.length >= 2 && activeFile != null
+        ) {
+            val res = withContext(Dispatchers.IO) {
+                com.example.utils.PdfDocumentSearch.search(searchContext, File(activeFile.path), inViewerSearchQuery)
             }
             pdfSearchResults = res
             totalMatchesCount = res.size
             currentMatchIndex = 0
-            if (res.isNotEmpty()) {
-                scrollToPage = res[0].pageNumber - 1
-            }
+            if (res.isNotEmpty()) scrollToPage = res.first().pageNumber - 1
         } else if (fileState is MainViewModel.FileContentState.PdfSuccess) {
             pdfSearchResults = emptyList()
             totalMatchesCount = 0
@@ -210,21 +222,31 @@ fun FilePreviewScreen(
         }
     }
 
-    // Text search effect
     val textContent = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content ?: ""
-    val textMatches = remember(textContent, inViewerSearchQuery) {
-        if (inViewerSearchQuery.length >= 2 && textContent.isNotEmpty()) {
-            val list = mutableListOf<Int>()
-            var idx = textContent.indexOf(inViewerSearchQuery, ignoreCase = true)
-            while (idx >= 0 && list.size < 500) {
-                list.add(idx)
-                idx = textContent.indexOf(inViewerSearchQuery, idx + inViewerSearchQuery.length.coerceAtLeast(1), ignoreCase = true)
+    val searchableText = when (fileState) {
+        is MainViewModel.FileContentState.TextSuccess -> textContent
+        is MainViewModel.FileContentState.DocxSuccess -> docxSearchContent
+        else -> ""
+    }
+    val textMatches = remember(searchableText, inViewerSearchQuery) {
+        if (inViewerSearchQuery.length >= 2 && searchableText.isNotEmpty()) {
+            val matches = mutableListOf<Int>()
+            var index = searchableText.indexOf(inViewerSearchQuery, ignoreCase = true)
+            while (index >= 0 && matches.size < 500) {
+                matches.add(index)
+                index = searchableText.indexOf(
+                    inViewerSearchQuery,
+                    index + inViewerSearchQuery.length.coerceAtLeast(1),
+                    ignoreCase = true
+                )
             }
-            list
+            matches
         } else emptyList()
     }
-    LaunchedEffect(textMatches) {
-        if (fileState is MainViewModel.FileContentState.TextSuccess) {
+    LaunchedEffect(textMatches, fileState) {
+        if (fileState is MainViewModel.FileContentState.TextSuccess ||
+            fileState is MainViewModel.FileContentState.DocxSuccess
+        ) {
             totalMatchesCount = textMatches.size
             currentMatchIndex = 0
         }
