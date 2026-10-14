@@ -2171,23 +2171,31 @@ fun CodePreview(
             }
 
             var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
-
+            var isCodePageLoaded by remember(fileEntity.path) { mutableStateOf(false) }
+            var lastAppliedSearchQuery by remember(fileEntity.path) { mutableStateOf<String?>(null) }
             var lastSearchNavigationToken by remember { mutableStateOf(searchNavigationToken) }
 
-            LaunchedEffect(searchQuery, webViewRef) {
+            LaunchedEffect(searchQuery, webViewRef, isCodePageLoaded) {
                 val webView = webViewRef ?: return@LaunchedEffect
-                if (searchQuery.isBlank()) webView.clearMatches() else webView.findAllAsync(searchQuery)
+                if (!isCodePageLoaded) return@LaunchedEffect
+                if (lastAppliedSearchQuery != searchQuery) {
+                    if (searchQuery.isBlank()) webView.clearMatches() else webView.findAllAsync(searchQuery)
+                    lastAppliedSearchQuery = searchQuery
+                    lastSearchNavigationToken = searchNavigationToken
+                }
             }
-            LaunchedEffect(searchNavigationToken, searchQuery, webViewRef) {
+            LaunchedEffect(searchNavigationToken, searchQuery, webViewRef, isCodePageLoaded) {
                 val webView = webViewRef ?: return@LaunchedEffect
-                if (searchQuery.isNotBlank() && searchNavigationToken != lastSearchNavigationToken) {
+                if (isCodePageLoaded && searchQuery.isNotBlank() &&
+                    searchNavigationToken != lastSearchNavigationToken
+                ) {
                     webView.findNext(searchNavigationForward)
                 }
                 lastSearchNavigationToken = searchNavigationToken
             }
-            LaunchedEffect(printRequested, webViewRef) {
+            LaunchedEffect(printRequested, webViewRef, isCodePageLoaded) {
                 val webView = webViewRef
-                if (printRequested && webView != null) {
+                if (printRequested && webView != null && isCodePageLoaded) {
                     com.example.utils.FilePrintHelper.printWebView(context, webView, fileEntity.name)
                     onPrintHandled()
                 }
@@ -2205,6 +2213,11 @@ fun CodePreview(
                 factory = { ctx ->
                     android.webkit.WebView(ctx).apply {
                         webViewRef = this
+                        webViewClient = object : android.webkit.WebViewClient() {
+                            override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                                isCodePageLoaded = true
+                            }
+                        }
                         settings.javaScriptEnabled = true
                         settings.allowFileAccess = false
                         settings.allowContentAccess = false
@@ -2217,6 +2230,7 @@ fun CodePreview(
                     webViewRef = webView
                     if (webView.tag != htmlContent) {
                         webView.tag = htmlContent
+                        isCodePageLoaded = false
                         webView.loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
                     }
                 }
