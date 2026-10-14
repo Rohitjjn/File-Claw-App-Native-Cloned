@@ -3,7 +3,7 @@
 Priorities: **P0** data loss / crash / security · **P1** high-impact feature or correctness · **P2** quality · **P3** polish.
 
 ## KNOWN ISSUES (read first)
-1. **Loop 6/7 Android verification is pending.** This editing environment could not establish a local checkout, so Gradle tasks were not run here. The dedicated .github/workflows/android-tests.yml workflow now runs on PRs to main and pushes to the Loop 6 branch. Check the actual workflow result, JUnit XML and reports before merging; no test/build pass is claimed until the run is green. Run `./gradlew :app:testDebugUnitTest`, `./gradlew compile_applet` if supplied by the build harness, and `./gradlew assembleDebug` before merge. Do not interpret the feature checklist below as a passing build report.
+1. **Loop 8 Android verification is pending.** The `.github/workflows/android-tests.yml` workflow runs on pull requests to `main` and uploads JUnit/JaCoCo/lint reports and a debug APK. Check the exact latest branch-head run before merge. Manual device validation is still required for immersive insets, DOCX zoom/dark mode, search highlighting and PrintManager output.
 2. Gradle wiring for JaCoCo (`jacocoCoreReport` / `jacocoCoreVerify`), `enableUnitTestCoverage`, detekt, and Room schema export is
    unverified. detekt is `ignoreFailures = true` until its first green run.
 3. Edits to files opened from another app are saved to the in-app copy only (the user is told). Write-back is P1 below.
@@ -15,6 +15,12 @@ Priorities: **P0** data loss / crash / security · **P1** high-impact feature or
 9. `applicationId` is still the AI-Studio-generated `com.aistudio.filesclaw.apxqzy`; JitPack repository is unscoped (supply-chain exposure).
 
 ## P0
+- [x] **Loop 8 — Four-format search:** PDFBox page-text search; DOCX OOXML text extraction; WebView previous/next navigation for DOCX/TXT/Markdown; one-character queries.
+- [x] **Loop 8 — Fenced code copy:** independent Copy code cards for Markdown/TXT fences, HTML escaping and tests for multiple/unclosed fences.
+- [x] **Loop 8 — Print / export routing:** PDF print adapter; rendered WebView printing for DOCX/TXT/Markdown after load.
+- [x] **Loop 8 — Immersive system bars:** transparent bars and restoration of original colors/insets on exit.
+- [x] **Loop 8 — DOCX/PDF night mode and fit:** mobile-fit DOCX viewport/dark styles; native PDF night mode path.
+- [ ] **Loop 8 — Android CI and device smoke tests:** pending the draft PR workflow and manual device validation.
 - [ ] Run the Loop 6 Quality Gate on an Android-capable runner and fix compile fallout (pending in this branch; see KNOWN ISSUES #1).
 - [x] Archive-password dialog masks input (`PasswordVisualTransformation`), PDF password also masked.
 - [x] `autoSaveDrafts` renamed to "Auto-save on Exit" with clear explanation; notification updated to "Changes saved to file."

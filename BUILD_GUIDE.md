@@ -19,6 +19,13 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`. No keystore needed: without `d
 ./gradlew :app:assembleDebug
 ```
 The separate GitHub Actions workflow .github/workflows/android-tests.yml runs these checks for pull requests targeting main, uploads JUnit/JaCoCo/lint reports and a debug APK, and checks whether compile_applet exists before attempting it. It does not create releases or publish artifacts publicly. Review the workflow result and downloaded reports before merging.
+### Four-format reader device smoke test
+- **PDF:** search a known word and a one-character query, navigate matches, toggle dark mode on text and image-heavy pages, then Print / Save as PDF.
+- **DOCX:** search body text, test fit on a small phone, pinch down to 0.25× and back, toggle dark mode without reopening, and print/export.
+- **TXT:** open prose with multiple triple-backtick blocks, copy one card and confirm no surrounding text is copied; search and print/export.
+- **Markdown:** verify headings/tables/code-fence copy, next/previous search, immersive mode without a black strip, and print/export.
+- Test light and dark themes; record device/API level and failures. CI cannot verify physical pinch gestures or print UI fidelity.
+
 If the first build fails to compile, the likely places are listed in `docs/TODO.md` → KNOWN ISSUES #1.
 
 ## Verify the core without Gradle

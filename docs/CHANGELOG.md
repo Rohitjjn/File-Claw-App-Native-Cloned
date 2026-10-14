@@ -4,9 +4,31 @@ Format: [Keep a Changelog](https://keepachangelog.com). Numbers marked **(measur
 run in the build sandbox; **(not verified)** means the change could not be compiled or run there (no Android SDK,
 no Maven access). See `TODO.md` → KNOWN ISSUES.
 
+## [Unreleased] — Four-format premium document reader
+
+### Changed
+- PDF text search uses PDFBox-Android page extraction, rather than treating stream order as physical page numbers. One-character searches are accepted.
+- DOCX/TXT/Markdown search navigation connects to rendered WebView find-in-page; DOCX text extraction runs off the main thread.
+- TXT and Markdown fenced code renders as independent copyable cards; copy returns only that block's content without fence markers.
+- PDF uses a dedicated PDF print adapter. DOCX/TXT/Markdown print the rendered WebView after load, avoiding binary-as-text conversion and blank early print jobs.
+- Immersive mode uses transparent system bars/edge-to-edge layout while focused, then restores original window colors/insets on exit.
+- DOCX starts at a more useful mobile-fit scale, keeps pinch zoom to 0.25× and applies dark styling without reopening.
+- PDF uses the viewer's supported night-mode renderer instead of a broad custom color matrix.
+
+### Added
+- Unit tests for PDF page matching/normalization and Markdown/TXT fenced-code copy rendering.
+- Canonical Loop 8/9 prompts and prompt archive index under `docs/prompts/`.
+- Optional Hermes Agent orchestration guidance. No Android runtime dependency is added.
+
+### Verification
+- Loop 8 Android verification is pending until the draft PR workflow completes on the latest branch head.
+- Manual device checks remain required for pinch gestures, immersive insets, dark-mode fidelity, text highlighting and PrintManager output.
+- No release-version bump is part of this loop.
+
 ## [1.5.0] "Immersive Reader, Appearance Controls & Document Outline": versionCode 7
 
 ### Added
+
 ### Loop 7 — Reliability and search hardening
 - PDF search now normalizes query and extracted strings with locale-stable case folding and whitespace collapsing, rejects non-positive result limits, and retains FlateDecode support.
 - Save As filename selection is centralized, protects the source file, avoids replacing existing exports, and rejects path-bearing filenames.
@@ -22,7 +44,7 @@ no Maven access). See `TODO.md` → KNOWN ISSUES.
 
 ### Verification status
 - Added pure-Kotlin Markdown outline tests and DOCX styled-heading extraction assertions.
-- **Build not verified in this editing environment**: Gradle commands were not run because a local checkout could not be established (GitHub clone failed with DNS resolution error). Run the Quality Gate in BUILD_GUIDE.md before merge.
+- **Historical verification:** Loop 6/7 unit tests, coverage, lint, Detekt and debug APK passed in the previous GitHub Actions run for PR #20. Loop 8 verification is tracked under [Unreleased]; review the latest Loop 8 branch workflow before merge.
 
 ## [1.4.0] "DOCX Engine Fix, Glass Properties Sheet & PDF Resume": versionCode 6
 

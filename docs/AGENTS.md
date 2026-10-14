@@ -1,12 +1,12 @@
 # AGENTS.md: how the improvement loop works
 
-This file lets the next run resume with full context. It is the operating manual for the multi-agent loop defined in `NEXT_PROMPT.md`.
+This file lets the next run resume with full context. The authoritative prompt index is `docs/prompts/README.md`; current improvement scope is PDF, DOCX, TXT and Markdown preview/search/print.
 
-## Roles (one agent per role; same repo, strict module boundaries)
-Architect · Reader/Analyzer · Planner · Coder ×3 · Designer · FileFormat · QA/Tester · Reviewer · DevOps · Docs · Release.
+## Team model (bounded workstreams; strict module boundaries)
+Use the 10 × 5 squad model in `docs/prompts/LOOP-08-four-format-premium-viewers.md`; one integration owner reconciles shared-file patches. Hermes Agent is optional: verify actual runtime availability/concurrency before claiming subagents ran.
 
 ## State to read on every run (in this order)
-`docs/AGENTS.md` → `docs/TODO.md` (KNOWN ISSUES first) → `docs/CHANGELOG.md` → `docs/ROADMAP.md` → source.
+`docs/prompts/README.md` → current numbered loop prompt → `docs/TODO.md` (KNOWN ISSUES first) → `docs/CHANGELOG.md` → `BUILD_GUIDE.md` → source and latest branch-head CI.
 Never recreate docs; update them. Add a CHANGELOG entry with **measured** numbers.
 
 ## Commands
