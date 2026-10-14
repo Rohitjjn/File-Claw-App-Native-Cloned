@@ -1,5 +1,6 @@
 package com.example.core.format
 
+import com.example.core.text.DocumentOutlineItem
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
@@ -17,7 +18,8 @@ object DocxExtractor {
         val paragraphs: List<String>,
         val plainText: String,
         val wordCount: Int,
-        val paragraphCount: Int
+        val paragraphCount: Int,
+        val outline: List<DocumentOutlineItem> = emptyList()
     )
 
     fun extractText(file: File): ExtractedDocx {
@@ -60,8 +62,43 @@ object DocxExtractor {
             paragraphs = paragraphs,
             plainText = plainText,
             wordCount = words,
-            paragraphCount = paragraphs.size
+            paragraphCount = paragraphs.size,
+            outline = parseOutlineFromXml(xmlString)
         )
+    }
+
+    /**
+     * Extract semantically styled Word headings. We intentionally do not infer headings from
+     * capitalization or paragraph length, which would create a misleading table of contents.
+     */
+    private fun parseOutlineFromXml(xml: String): List<DocumentOutlineItem> {
+        val outline = mutableListOf<DocumentOutlineItem>()
+        val paragraphRegex = Regex("<w:p(?:\\s[^>]*)?>(.*?)</w:p>", RegexOption.DOT_MATCHES_ALL)
+        val propertiesRegex = Regex("<w:pPr(?:\\s[^>]*)?>(.*?)</w:pPr>", RegexOption.DOT_MATCHES_ALL)
+        val styleRegex = Regex("<w:pStyle\\b[^>]*w:val\\s*=\\s*['\"]([^'\"]+)['\"][^>]*/?>")
+        val textRegex = Regex("<w:t(?:\\s[^>]*)?>(.*?)</w:t>", RegexOption.DOT_MATCHES_ALL)
+
+        for (paragraph in paragraphRegex.findAll(xml)) {
+            val block = paragraph.groupValues[1]
+            val properties = propertiesRegex.find(block)?.groupValues?.get(1) ?: continue
+            val styleId = styleRegex.find(properties)?.groupValues?.get(1) ?: continue
+            val level = Regex("(?i)heading\\s*([1-6])").find(styleId)?.groupValues?.get(1)?.toIntOrNull()
+                ?: when (styleId.lowercase()) {
+                    "title" -> 1
+                    "subtitle" -> 2
+                    else -> null
+                } ?: continue
+            val title = textRegex.findAll(block).joinToString("") {
+                it.groupValues[1]
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&amp;", "&")
+            }.trim()
+            if (title.isNotEmpty()) {
+                outline += DocumentOutlineItem(title, level.coerceIn(1, 6), outline.size)
+            }
+        }
+        return outline
     }
 
     private fun parseParagraphsFromXml(xml: String): List<String> {

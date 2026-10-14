@@ -19,6 +19,7 @@ class DocxExtractorTest {
             <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
                 <w:body>
                     <w:p>
+                        <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
                         <w:r><w:t>File Claw Offline Document</w:t></w:r>
                     </w:p>
                     <w:p>
@@ -41,6 +42,8 @@ class DocxExtractorTest {
         assertTrue(result.plainText.contains("File Claw Offline Document"))
         assertTrue(result.plainText.contains("This is a paragraph test for DOCX extraction & viewing."))
         assertTrue(result.wordCount > 5)
+        assertEquals(listOf("File Claw Offline Document"), result.outline.map { it.title })
+        assertEquals(1, result.outline.single().level)
     }
 
     @Test
