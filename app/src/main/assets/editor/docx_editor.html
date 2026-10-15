@@ -6,6 +6,7 @@
     <script src="jszip.min.js"></script>
     <script src="docx-preview.min.js"></script>
     <style>
+        body { touch-action: manipulation; }
         :root {
             --bg-color: #faf9f5;
             --text-primary: #141413;
@@ -200,9 +201,19 @@
             pages.forEach(page => pageObserver.observe(page));
         }
 
+        let lastTapTime = 0;
         document.addEventListener('click', function (event) {
             const target = event.target && event.target.closest ? event.target.closest('a, button, input, textarea, select') : null;
-            if (!target && window.Android && window.Android.onDocumentTap) window.Android.onDocumentTap();
+            if (target || !window.Android) return;
+            const now = Date.now();
+            if (now - lastTapTime < 300) {
+                // Double tap: toggle zoom (handled natively), suppress the second single tap.
+                lastTapTime = 0;
+                if (window.Android.onDocumentDoubleTap) window.Android.onDocumentDoubleTap();
+            } else {
+                lastTapTime = now;
+                if (window.Android.onDocumentTap) window.Android.onDocumentTap();
+            }
         });
 
         function notifySearchCount() {

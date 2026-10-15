@@ -23,6 +23,12 @@ Next Review Date: January 15, 2027
 | BUG-004 | CSV Table Horizontal Scroll | LOW| OPEN| `UI`| Extreme widths cause minor clipping on strict bounds. |
 | BUG-005 | Password Field Obscuring | LOW| OPEN| `UI`| Keyboard overlaps the unlock dialog on small screens. |
 
+### Loop 8 watchlist
+- **PDF crisp-zoom memory**: the per-page 9M-pixel budget (~36MB ARGB) bounds memory, but very long sessions at 5× zoom on low-RAM devices may still pressure the heap; `releaseRecord` frees offscreen pages (monitor via `dumpsys meminfo`).
+- **PDF smart-dark classification threshold**: the 4% saturated-pixel cutoff is a heuristic; pages that mix large photos WITH body text invert the photos only if the text dominates. Tunable in `classifyPage()` (`assets/pdfjs/search.html`).
+- **DOCX pinch vs text selection**: 2-finger gestures are consumed at the Initial pass; long-press selection inside the rendered DOCX is unaffected, but exotic WebView widgets may need per-case validation.
+- **Search ranking is name-only**: global search still matches file NAMES, not contents; content search is planned (see `docs/prompts/NEXT_LOOP_PROMPT.md`).
+
 ## 4. Recently Fixed Issues
 - **Light-mode status bar icons invisible (user-reported, Loop 7)**: `enableEdgeToEdge()` set icon appearance from the system dark-mode flag once, while the canvas followed the in-app theme. *Fix*: `FilesClawTheme` now re-asserts `isAppearanceLightStatusBars/NavigationBars` on the host window whenever the in-app theme resolves (`ui/theme/Theme.kt`).
 - **Preview top bar duplicated the bottom tray (user-reported, Loop 7)**: Search/Outline/Focus/Copy icons were stacked in the top bar. *Fix*: top bar reduced to back + file name + 3-dot menu.
@@ -31,6 +37,11 @@ Next Review Date: January 15, 2027
 - **TextFileSearchEngine overlap double-count**: cross-chunk candidates starting inside a previously counted match were double-counted. *Fix*: byte-range guard + regression coverage.
 - **Test suite did not compile**: pre-existing type error in `TextFileSearchEngineTest` (String vs ByteArray). *Fix*: corrected; suite is 134/134 green as of Loop 7.
 - **PDF Password Crash**: `PdfRenderer` previously crashed wildly on encrypted files. *Fix*: Implemented `PDFBox-Android` as a robust fallback to decrypt safely into cache. Verified via local tests.
+- **PDF zoom blurry at high scale (user-reported, Loop 8)**: pages were rasterized once at ≤2 device pixels per CSS pixel and pinch merely magnified the bitmap. *Fix*: `onScaleChanged` debounce feeds the settled scale to `setPdfRenderScale()` which re-rasterizes visible pages under a ~9M-pixel/page budget (`assets/pdfjs/search.html`, `FilePreviewScreen.kt`).
+- **PDF dark mode turned photos ghost-like (user-reported, Loop 8)**: whole-canvas `invert(.88)` inverted faces into negatives. *Fix*: per-page classification (48px downsample, >4% saturated pixels ⇒ `photo` class) keeps photo pages natural with a slight dim; text pages get a full luminance inversion.
+- **Focus-mode transition snapped/flashy (user-reported, Loop 8)**: content padding flipped binary at frame 0, status-bar inset flipped instantly, and PDF pages re-rendered (blank flash) per resize frame. *Fix*: scaffold insets always applied (animate frame-by-frame), unconditional `statusBarsPadding()`, matched 220–260ms tween specs, debounced JS resize + skip-if-unchanged geometry.
+- **Global search listed deleted files (Loop 8)**: results are existence-filtered after relevance ranking (`FileSearchRanker`).
+- **Search-term history corrupted by `|*|` in queries (Loop 8)**: storage migrated to a JSON array with legacy-format fallback read.
 
 ## 5. Technical Debt Register
 - **Architecture Debt**: `MainViewModel` is a God Class. It manages Home, Preview, Editor, and Navigation. MUST be split into scoped viewmodels. *(Loop 7 note: inline edit state was added minimally; a full split is planned behind the MD/TXT loops.)*

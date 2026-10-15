@@ -338,9 +338,9 @@ internal fun buildPlainTextPreviewHtml(
             .copy-btn { padding: 6px 10px; border: 1px solid $border; border-radius: 8px; background: transparent; color: $buttonColor; font: 600 12px sans-serif; }
             .code-content { overflow-x: auto; padding: 14px; background: $codeBackground; }
             .code-content pre { white-space: pre; overflow-wrap: normal; }
-            .search-highlight { background: #ffe082; color: #17130a; border-radius: 2px; }
-            .search-highlight-active { background: #ff9800; color: #17130a; outline: 2px solid #e65100; }
-            .line-anchor-flash { background: #ffe082; color: #17130a; border-radius: 2px; outline: 2px solid #ff9800; transition: background 0.4s ease; }
+            .search-highlight { background: rgba(204, 120, 92, 0.32); color: inherit; border-radius: 2px; }
+            .search-highlight-active { background: #cc785c; color: #ffffff; outline: 2px solid rgba(232, 165, 90, 0.9); }
+            .line-anchor-flash { background: rgba(204, 120, 92, 0.32); color: inherit; border-radius: 2px; outline: 2px solid #cc785c; transition: background 0.4s ease; }
             @media print { .code-header, .copy-btn { display: none !important; } .code-block-container { break-inside: avoid; } }
           </style>
           $DocumentPreviewScript

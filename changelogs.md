@@ -15,23 +15,78 @@ Next Review Date: January 15, 2027
 - Example: `v1.2.4` (Major 1, Minor 2, Patch 4).
 
 ## 3. Current Version Section
-**Current Version:** v1.2.0
+**Current Version:** v1.3.0
 **Release Date:** October 15, 2026
-**Total Changes:** MD/TXT experience overhaul — light-mode status bar fix, clean top bar, working Document Outline & Viewer Appearance (with browser-style 25%–500% zoom), fully working in-document search, and a premium inline edit mode on the same screen. First loop with a fully compiled and tested build (134 unit tests green, debug APK assembled).
+**Total Changes:** Search experience overhaul (relevance-ranked global search, match highlighting, themed in-viewer search bar, keyboard actions, WebView re-highlight debounce) + PDF reader fixes (crisp pinch re-rasterization like Google Drive, smart dark mode that keeps photos natural, smooth focus-mode transition) + DOCX upgrades (opens at 40% zoom, pinch-to-zoom, double-tap 40%⇄100% toggle, persisted zoom). Dedicated tests are included for the new pure-Kotlin policies. This repository integration has not been build/test-verified here; Android APK assembly remains delegated to GitHub Actions.
 
 **Highlights:**
-- Status bar icons now follow the in-app theme in light mode (were invisible on white canvas).
-- Top bar shows only back arrow + file name + 3-dot menu; duplicate action icons removed.
-- Document Outline and Viewer Appearance menu items are wired to real bottom sheets and work.
-- In-document search auto-focuses with the keyboard raised; matches navigate correctly.
-- Edit button morphs the preview into an editor in place (no separate screen): undo/redo/tab/bold/italic/history tray, X-to-discard confirmation, save confirmation, export modified copy.
-- Viewer Appearance gains syntax themes (incl. Auto), font size control, and browser-style zoom 25%–500% persisted across sessions.
-- Pre-existing unit-test compilation error fixed and a real overlap-dedup bug in `TextFileSearchEngine` fixed; full test suite now green.
+- Global search now ranks results (exact > prefix > word-boundary > substring), highlights the matched part of each file name, shows per-section result counts and a "first 150 of 150+" notice, and no longer lists files deleted from disk.
+- Search-term history moved to a robust JSON storage with legacy migration and a "Clear all" action.
+- In-viewer search bar: terracotta match-count badge, animated prev/next controls, keyboard Search action jumps to the next match, 40dp touch targets, and themed terracotta highlights across MD/TXT/PDF pipelines.
+- PDF zoom re-rasterizes pages at the settled pinch scale with a per-page pixel budget — text stays crisp at up to 5× instead of magnifying a blurry bitmap.
+- PDF smart dark mode classifies each rendered page (photo-heavy vs text) and only inverts text pages; photos and scanned portraits keep their natural colors.
+- Focus mode transition is smooth everywhere: content resizes with the animating bars, status-bar inset no longer flips, and the PDF WebView resize storm (blank flashing pages) is debounced away.
+- DOCX documents open at 40% zoom by default (persisted across sessions), support pinch in/out and a double-tap 40%⇄100% toggle, with no 100% flash on open; the zoom slider now includes 40% as a stop.
+- New pure-logic modules `FileSearchRanker` and `DocxZoomPolicy` with dedicated unit tests.
 
 **Issues In Progress:**
 - See `known-issues.md`; next-loop prompt lives at `docs/prompts/NEXT_LOOP_PROMPT.md`.
 
 ## 4. Version History
+
+### [v1.3.0] - Search Polish, PDF Reader Fixes & DOCX Zoom (2026-10-15)
+**[ADDED]**
+- **Affected:** `core/search/FileSearchRanker.kt` (new), `src/test/java/com/example/core/search/FileSearchRankerTest.kt` (new)
+- **Description:** Pure relevance-ranking + match-highlight policy for global search: exact (400) > prefix (300) > word-boundary (200) > substring (100), tie-broken by shorter then alphabetical name; exposes `rank()`, `firstMatchRange()` and `isTruncated()`. Includes six dedicated unit tests.
+- **Author:** Loop 8 senior-agent team
+- **Affected:** `core/format/DocxZoomPolicy.kt` (new), `src/test/java/com/example/core/format/DocxZoomPolicyTest.kt` (new)
+- **Description:** DOCX zoom policy: shipped default 40%, clamp 25–500%, pinch multiply with de-noising, double-tap 40%⇄100% toggle, percent conversions. Includes six dedicated unit tests.
+- **Author:** Loop 8 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt`, `assets/editor/docx_editor.html`, `ui/component/AppearanceBottomSheet.kt`
+- **Description:** DOCX pinch-to-zoom (Compose-level 2-finger interception on the Initial pointer pass driving the shared `setZoom()` pipeline; single-finger scroll untouched) and double-tap 40%⇄100% toggle (JS-side detection with a new `onDocumentDoubleTap` bridge). DOCX zoom now persists per session via `ViewerAppearancePrefs.get/setDocxZoomPercent`.
+- **Author:** Loop 8 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt` (`PdfPreview`)
+- **Description:** `onScaleChanged` + debounce now feeds the settled pinch scale to the new `setPdfRenderScale()` JS hook, which re-rasterizes visible pages at the new resolution without touching CSS layout (Google-Drive-style crisp zoom).
+- **Author:** Loop 8 senior-agent team
+
+**[CHANGED]**
+- **Affected:** `.github/workflows/build-and-release.yml`
+- **Description:** Updated the manual release workflow's default version-name input to v1.3.0 so a default dispatch matches the app's current version; version-code auto-generation and the release workflow trigger remain unchanged.
+- **Affected:** `assets/pdfjs/search.html`
+- **Description:** Page rasterization is now hi-DPI aware and zoom-aware: desired ratio = devicePixelRatio × pinch scale, capped by a ~9M-pixel per-page budget (≈36MB ARGB) and ratio 6 — sharp at high zoom with bounded memory. Search highlights re-themed to the Claude terracotta palette. Night mode now uses a full luminance inversion (`invert(1) hue-rotate(180deg) brightness(.94) contrast(.92)`) on text pages.
+- **Author:** Loop 8 senior-agent team
+- **Affected:** `assets/pdfjs/search.html`
+- **Description:** Smart dark mode: every rendered page is classified via a 48px downsample measuring saturated-pixel fraction; pages >4% colorful pixels get the `photo` class and keep natural colors (only slightly dimmed) instead of becoming ghost-like negatives. Runs once per render, filter-independent, best-effort.
+- **Author:** Loop 8 senior-agent team
+- **Affected:** `assets/pdfjs/search.html`
+- **Description:** WebView `resize` handler debounced (180ms) and `updateRecordGeometry` skips records whose viewport is unchanged — kills the per-frame canvas zeroing/re-render storm that flashed blank pages during focus-mode transitions and rotations.
+- **Author:** Loop 8 senior-agent team
+- **Affected:** `ui/screens/SearchScreen.kt`, `viewmodel/MainViewModel.kt`, `MainActivity.kt`
+- **Description:** Global search upgraded: relevance-ranked results (via `FileSearchRanker`), files deleted from disk are filtered before display, new `deviceSearchTruncated` state drives a "first 150 of 150+" notice, result rows carry a highlighted matched substring (terracotta bold), section headers show result counts, on-palette accent colors replace hardcoded hex values, rows use 16dp radius + hairline border + `animateItemPlacement()`, empty state gained a hint line, and the screen now raises the keyboard on open. Search-term history persisted as a JSON array with legacy `|*|` migration plus a "Clear all" action. Dead `onNavigateToPreview` parameter removed.
+- **Author:** Loop 8 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt`
+- **Description:** DOCX documents open at 40% zoom by default (seeded from the persisted preference) and the zoom is applied BEFORE `loadDocx`, so the document never flashes at 100%. Zoom slider switched to 0.05 steps so 40% is a reachable stop, with a policy-driven coerce. Bottom-bar DOCX gate now keys on `DocxSuccess` state only (legacy `.doc` hex view no longer shows zoom buttons).
+- **Author:** Loop 8 senior-agent team
+- **Affected:** `ui/screens/DocumentPreviewSupport.kt`, `ui/screens/FilePreviewScreen.kt`
+- **Description:** MD/TXT search highlight CSS re-themed from amber to the Claude terracotta palette (translucent fill, solid terracotta active state with warm outline).
+- **Author:** Loop 8 senior-agent team
+
+**[FIXED]**
+- **Affected:** `assets/pdfjs/search.html`, `ui/screens/FilePreviewScreen.kt`
+- **Description:** PDF zoom blurriness (user-reported): pages were rasterized once at ≤2 device pixels per CSS pixel and pinch only magnified that bitmap. Now the settled pinch scale re-rasterizes visible pages at the new resolution inside a pixel budget, keeping text crisp up to 5×.
+- **Author:** Loop 8 senior-agent team
+- **Affected:** `assets/pdfjs/search.html`
+- **Description:** PDF dark-mode "ghost people" (user-reported): whole-canvas `invert(.88)` turned faces into washed-out negatives. Smart per-page classification now keeps photo-heavy pages natural while text pages get a clean full inversion.
+- **Author:** Loop 8 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt`
+- **Description:** Focus-mode transition (user-reported, all file types): content padding flipped binary at frame 0 while bars were still animating, and the top-bar/status-bar inset flipped instantly — the jarring snap is gone because scaffold insets are now always applied and animate frame-by-frame; all bar/pill/overlay transitions share matched 220–260ms FastOutSlowInEasing specs; the top bar and search overlay no longer teleport under the status bar mid-animation.
+- **Author:** Loop 8 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt`
+- **Description:** In-viewer search overlay: keyboard Search/Enter now jumps to the next match (shared `goToNextMatch`/`goToPrevMatch` handlers with the arrow buttons), match counter upgraded to a themed badge (error-tinted on zero matches), prev/next controls animate in/out with scale+fade and use 36dp targets. WebView re-highlight is debounced 150ms so typing in large documents no longer re-runs the DOM highlight per keystroke.
+- **Author:** Loop 8 senior-agent team
+- **Affected:** `viewmodel/MainViewModel.kt`
+- **Description:** Global search could surface deleted files (tapping failed); results are now existence-filtered after ranking. Search-term history used a fragile `|*|` separator that corrupted on queries containing it; storage migrated to JSON with fallback read.
+- **Author:** Loop 8 senior-agent team
 
 ### [v1.2.0] - MD/TXT Premium Round: Inline Edit, Outline, Appearance & Zoom (2026-10-15)
 **[FIXED]**
