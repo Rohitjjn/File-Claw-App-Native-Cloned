@@ -66,7 +66,9 @@ object PreviewTextUtils {
                 continue
             }
 
-            val innerLines = lines.subList(index + 1, closingIndex)
+            // Normalize CRLF input so copied code has stable LF line endings, while
+            // preserving indentation and all actual code characters.
+            val innerLines = lines.subList(index + 1, closingIndex).map { it.removeSuffix("\r") }
             val code = if (innerLines.isEmpty()) "" else innerLines.joinToString("\n") + "\n"
             blocks += FencedCodeBlock(language = language, code = code, openingLine = index + 1)
             index = closingIndex + 1
