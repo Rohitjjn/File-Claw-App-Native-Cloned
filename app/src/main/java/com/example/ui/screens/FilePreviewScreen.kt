@@ -3978,7 +3978,7 @@ fun DocxPreviewWebView(
                             Text("+", fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
                         }
                         IconButton(onClick = { fitPageEnabled = !fitPageEnabled; zoomPercent = 100 }, modifier = Modifier.size(34.dp)) {
-                            Icon(Icons.Default.FitScreen, contentDescription = if (fitPageEnabled) "Disable fit page" else "Fit page", modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Fullscreen, contentDescription = if (fitPageEnabled) "Disable fit page" else "Fit page", modifier = Modifier.size(18.dp))
                         }
                     }
                 }
