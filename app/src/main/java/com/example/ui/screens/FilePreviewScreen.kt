@@ -2837,26 +2837,10 @@ fun PdfPreview(
  * while preserving natural skin tones and photographic colors so photos don't look like negative ghosts.
  */
 private fun applySmartPdfNightMode(pdfView: com.github.barteksc.pdfviewer.PDFView, isNight: Boolean) {
-    try {
-        pdfView.setNightMode(false)
-        val paintField = com.github.barteksc.pdfviewer.PDFView::class.java.getDeclaredField("paint")
-        paintField.isAccessible = true
-        val paint = paintField.get(pdfView) as? android.graphics.Paint
-        if (paint != null) {
-            paint.colorFilter = if (isNight) {
-                val matrix = floatArrayOf(
-                     0.25f, -0.70f, -0.315f, 0f, 225f,
-                    -0.35f,  0.05f, -0.465f, 0f, 225f,
-                    -0.45f, -0.45f,  0.135f, 0f, 225f,
-                     0.00f,  0.00f,  0.000f, 1f,   0f
-                )
-                android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix(matrix))
-            } else null
-            pdfView.invalidate()
-        }
-    } catch (e: Exception) {
-        pdfView.setNightMode(isNight)
-    }
+    // Use the PDF renderer's public API. Reflection on its private Paint is brittle and
+    // applies a color matrix to the entire page, damaging embedded photos and diagrams.
+    pdfView.setNightMode(isNight)
+    pdfView.invalidate()
 }
 
 @Composable
