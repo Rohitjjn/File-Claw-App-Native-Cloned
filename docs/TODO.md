@@ -1,16 +1,17 @@
 ## Loop 8 — Four-format document preview polish (in progress)
 
-- [ ] Full-document search and next/previous navigation for PDF, DOCX, TXT and MD, with real result mapping/highlighting.
-- [ ] Restore the TXT/MD preview UI from the verified two-loops-earlier revision.
-- [ ] Copy individual fenced code blocks in MD and TXT (inner content only).
-- [ ] Correct print/export routing for PDF, DOCX, TXT and MD.
-- [ ] Verify immersive focus mode fills the screen without a black status-bar strip.
-- [ ] Verify DOCX fit-to-width/fit-page, zoom-out and live dark-mode styling.
-- [ ] Replace PDF dark-mode reflection hack with supported renderer behavior where feasible.
-- [ ] Add regression tests and complete Android CI plus real-device smoke checks.
-- [x] Add numbered Loop 8 and Loop 9 prompt files under `docs/loops/`.
+- [x] Added shared case-insensitive text-match offsets and fenced-code extraction utility, with unit tests for case-insensitive occurrences, indentation-preserving copy payloads, tilde fences, multiple blocks and unclosed fences.
+- [x] Restored the default native reader selection for TXT/MD (rendered view remains available via the existing toggle).
+- [x] Improved focus-mode edge-to-edge handling and restoration of system-bar/window state on exit/disposal.
+- [x] Replaced PDF private-field color-filter reflection with the renderer's public night-mode API; image-heavy/scanned PDFs may remain renderer-limited.
+- [x] Exposed DOCX in the search and immersive-focus entry points.
+- [ ] Wire search result selection to actual match highlighting and navigation for all four formats; PDF raw-stream search remains approximate.
+- [ ] Add the individual fenced-block Copy controls to Markdown and TXT rendered previews.
+- [ ] Complete correct PDF and DOCX print/export routing and WebView cleanup.
+- [ ] Complete DOCX fit-page/zoom behavior and theme styling for tables, inline runs and images.
+- [ ] Run Android unit tests, coverage, lint, Detekt and debug APK CI; perform real-device smoke checks for all four formats and navigation modes.
 
-Status note: this list is intentionally not marked complete until implementation, automated verification, CI, and manual-device evidence are available.
+Status note: checked items above are source changes, not a passing build or verified device behavior. Keep PR in draft until outstanding items and the verification gate are complete.
 
 # Backlog and known issues
 
