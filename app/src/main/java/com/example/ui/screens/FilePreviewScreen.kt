@@ -229,6 +229,15 @@ fun FilePreviewScreen(
         }
     }
 
+    LaunchedEffect(currentMatchIndex, textMatches, textContent, fileState) {
+        if (fileState is MainViewModel.FileContentState.TextSuccess && textMatches.isNotEmpty()) {
+            val offset = textMatches.getOrNull(currentMatchIndex.coerceIn(0, textMatches.lastIndex))
+            if (offset != null) {
+                scrollToLineNumber = textContent.substring(0, offset).count { it == '\n' } + 1
+            }
+        }
+    }
+
     val context = LocalContext.current
     val viewerPreferences = remember(context) {
         context.getSharedPreferences("viewer_appearance", android.content.Context.MODE_PRIVATE)
@@ -1910,6 +1919,10 @@ fun CodePreview(
     val context = androidx.compose.ui.platform.LocalContext.current
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     var isAllCopied by remember { mutableStateOf(false) }
+    var copiedFenceIndex by remember { mutableStateOf<Int?>(null) }
+    val fencedCodeBlocks = remember(codeText) {
+        com.example.core.text.PreviewTextUtils.extractFencedCodeBlocks(codeText)
+    }
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
 
     LaunchedEffect(isAllCopied) {
@@ -1980,6 +1993,34 @@ fun CodePreview(
             )
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+
+        if (fencedCodeBlocks.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                fencedCodeBlocks.forEachIndexed { index, block ->
+                    TextButton(
+                        onClick = {
+                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(block.code))
+                            copiedFenceIndex = index
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (copiedFenceIndex == index) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
+                            contentDescription = if (copiedFenceIndex == index) "Code block copied" else "Copy code block ${index + 1}",
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(if (copiedFenceIndex == index) "Copied block ${index + 1}" else "Copy block ${index + 1}", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
 
         Box(
             modifier = Modifier
