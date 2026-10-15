@@ -1,5 +1,10 @@
 ## Loop 8 — Document preview polish (in progress)
 
+- Added document-specific PrintManager routing: PDFs are printed page-by-page through Android's PDF renderer, DOCX uses its rendered WebView, and TXT/Markdown remain readable text print jobs.
+- Added fenced-code copy controls for native TXT/code previews and selected-match line navigation for text search.
+- Added DOCX paragraph search counting/navigation and a theme override for document text and tables that deliberately does not invert images.
+- Verification is still in progress; these changes are not marked device-tested until CI and manual smoke checks are complete.
+
 - Added `docs/loops/LOOP_08_DOCUMENT_PREVIEW_POLISH.md` as the focused execution contract for PDF, DOCX, TXT and Markdown only.
 - Added `docs/loops/LOOP_09_NEXT_LOOP_PROMPT.md` to guide the next evidence-led review after Loop 8 verification.
 - Exposed DOCX in the in-viewer search entry point and immersive-focus action set. Search result extraction/navigation and actual device behavior still require implementation and verification; these UI entry-point changes alone do not resolve the full reported issues.
