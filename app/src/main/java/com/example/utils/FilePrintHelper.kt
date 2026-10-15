@@ -14,7 +14,6 @@ import android.graphics.Bitmap
 import android.graphics.RectF
 import android.graphics.Matrix
 import android.os.Bundle
-import android.print.PrintAttributes
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import java.io.File
@@ -61,7 +60,7 @@ object FilePrintHelper {
                         }
                     }
                     val media = newAttributes.mediaSize
-                    if (media != null) pageSize = android.util.Size(media.widthMils / 10, media.heightMils / 10)
+                    if (media != null) pageSize = android.util.Size((media.widthMils * 72 / 1000).coerceAtLeast(1), (media.heightMils * 72 / 1000).coerceAtLeast(1))
                     callback.onLayoutFinished(
                         PrintDocumentInfo.Builder(title)
                             .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
@@ -98,7 +97,7 @@ object FilePrintHelper {
                                     val scale = minOf(
                                         targetWidth.toFloat() / sourcePage.width,
                                         targetHeight.toFloat() / sourcePage.height
-                                    ).coerceAtMost(2.0f)
+                                    ).coerceAtMost(1.5f)
                                     val bitmap = Bitmap.createBitmap(
                                         (sourcePage.width * scale).toInt().coerceAtLeast(1),
                                         (sourcePage.height * scale).toInt().coerceAtLeast(1),
