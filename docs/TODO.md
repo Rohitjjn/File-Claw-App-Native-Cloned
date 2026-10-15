@@ -3,6 +3,7 @@
 - [x] Harden TXT/Markdown print-job lifecycle by keeping the temporary WebView alive through Android PrintDocumentAdapter completion and disposing it from the adapter finish callback.
 - [x] Escape both document content and title before inserting them into the print HTML; report unavailable print service and print-start errors.
 - [x] Add regression tests for repeated Unicode search matches/UTF-16 offsets, result limits, CRLF code fences, embedded backticks, and closing-fence length rules.
+- [x] Fixed the failing CRLF fenced-code test by normalizing carriage returns in copied code-block payloads to LF; regression test now expects stable LF output.
 - [x] Add the evidence-led Loop 10 prompt at `docs/loops/LOOP_10_NEXT_LOOP_PROMPT.md`.
 - [ ] Inspect latest GitHub Actions run for Loop 9 commit; unit tests, coverage, lint, Detekt and debug APK must pass.
 - [ ] Real-device print lifecycle, Unicode search and fenced-code copy smoke tests remain pending.
