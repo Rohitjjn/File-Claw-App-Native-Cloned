@@ -70,4 +70,3 @@ class PreviewTextUtilsTest {
         assertEquals("line 1\n```\nline 2\n", blocks.single().code)
     }
 }
-}
