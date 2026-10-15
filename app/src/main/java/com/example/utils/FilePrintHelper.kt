@@ -11,13 +11,10 @@ import android.os.ParcelFileDescriptor
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.graphics.Bitmap
-import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Matrix
 import android.os.Bundle
 import android.print.PrintAttributes
-import android.print.PrintDocumentAdapter.LayoutResultCallback
-import android.print.PrintDocumentAdapter.WriteResultCallback
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import java.io.File
