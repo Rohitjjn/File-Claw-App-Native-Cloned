@@ -77,4 +77,26 @@ class FencedCodeParserTest {
             FencedCodeParser.split(source)
         )
     }
+
+    @Test
+    fun rangesCoverTheSourceExactly() {
+        val source = "intro\r\n```kt\r\nval a = 1\r\n```\r\noutro"
+        val ranged = FencedCodeParser.splitWithRanges(source)
+
+        assertEquals(3, ranged.size)
+        assertEquals(0, ranged.first().start)
+        assertEquals(source.length, ranged.last().end)
+        ranged.zipWithNext().forEach { (a, b) -> assertEquals(a.end, b.start) }
+        ranged.forEach { assertEquals(it.segment.text, source.substring(it.contentStart, it.contentEnd)) }
+        val code = ranged[1]
+        assertEquals("```kt\r\nval a = 1\r\n```\r\n", source.substring(code.start, code.end))
+        assertEquals(FencedCodeParser.split(source), ranged.map { it.segment })
+    }
+
+    @Test
+    fun emptySourceHasOneEmptyRange() {
+        val ranged = FencedCodeParser.splitWithRanges("")
+        assertEquals(1, ranged.size)
+        assertEquals(0, ranged[0].end)
+    }
 }

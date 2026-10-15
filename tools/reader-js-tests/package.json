@@ -1,0 +1,11 @@
+{
+  "name": "files-claw-reader-js-tests",
+  "private": true,
+  "description": "jsdom tests for the Markdown/TXT reader runtime (app/src/main/assets/reader/reader.js)",
+  "scripts": {
+    "test": "node --check ../../app/src/main/assets/reader/reader.js && node serialize.test.js && node edge-cases.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "24.1.3"
+  }
+}

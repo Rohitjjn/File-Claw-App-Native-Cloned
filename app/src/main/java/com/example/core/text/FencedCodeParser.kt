@@ -9,6 +9,19 @@ sealed interface FencedCodeSegment {
 }
 
 /**
+ * A segment together with its exact position in the source.
+ * [start] until [end] covers the whole segment (for code: including both fence lines);
+ * [contentStart] until [contentEnd] covers only [FencedCodeSegment.text].
+ */
+data class RangedFencedSegment(
+    val segment: FencedCodeSegment,
+    val start: Int,
+    val end: Int,
+    val contentStart: Int,
+    val contentEnd: Int
+)
+
+/**
  * Splits text on line-started backtick or tilde fences without interpreting or changing code content.
  * The fence lines are omitted from [FencedCodeSegment.Code]; line endings inside the code are kept.
  * An unmatched opening fence is treated as a code block through end-of-file, matching Markdown.
@@ -17,10 +30,13 @@ object FencedCodeParser {
     private data class Line(val start: Int, val end: Int, val text: String)
     private data class Fence(val marker: Char, val length: Int, val language: String)
 
-    fun split(source: String): List<FencedCodeSegment> {
-        if (source.isEmpty()) return listOf(FencedCodeSegment.Plain(""))
+    fun split(source: String): List<FencedCodeSegment> = splitWithRanges(source).map { it.segment }
 
-        val segments = mutableListOf<FencedCodeSegment>()
+    /** Same split as [split], plus the source offsets of every segment (used to map views back to the file). */
+    fun splitWithRanges(source: String): List<RangedFencedSegment> {
+        if (source.isEmpty()) return listOf(RangedFencedSegment(FencedCodeSegment.Plain(""), 0, 0, 0, 0))
+
+        val segments = mutableListOf<RangedFencedSegment>()
         var cursor = 0
         var scan = 0
         while (scan < source.length) {
@@ -32,7 +48,7 @@ object FencedCodeParser {
             }
 
             if (openingLine.start > cursor) {
-                segments += FencedCodeSegment.Plain(source.substring(cursor, openingLine.start))
+                segments += plain(source, cursor, openingLine.start)
             }
 
             val codeStart = openingLine.end
@@ -48,18 +64,27 @@ object FencedCodeParser {
             }
 
             if (closing == null) {
-                segments += FencedCodeSegment.Code(opening.language, source.substring(codeStart))
+                segments += RangedFencedSegment(
+                    FencedCodeSegment.Code(opening.language, source.substring(codeStart)),
+                    openingLine.start, source.length, codeStart, source.length
+                )
                 return segments
             }
 
-            segments += FencedCodeSegment.Code(opening.language, source.substring(codeStart, closing.start))
+            segments += RangedFencedSegment(
+                FencedCodeSegment.Code(opening.language, source.substring(codeStart, closing.start)),
+                openingLine.start, closing.end, codeStart, closing.start
+            )
             cursor = closing.end
             scan = cursor
         }
 
-        if (cursor < source.length) segments += FencedCodeSegment.Plain(source.substring(cursor))
+        if (cursor < source.length) segments += plain(source, cursor, source.length)
         return segments
     }
+
+    private fun plain(source: String, start: Int, end: Int) =
+        RangedFencedSegment(FencedCodeSegment.Plain(source.substring(start, end)), start, end, start, end)
 
     private fun parseOpening(line: String): Fence? {
         val start = line.indexOfFirst { !it.isWhitespace() }

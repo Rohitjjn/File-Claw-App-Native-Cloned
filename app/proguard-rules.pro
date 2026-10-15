@@ -33,3 +33,10 @@
 -dontwarn javax.xml.stream.**
 -dontwarn org.codehaus.stax2.**
 -dontwarn com.fasterxml.aalto.**
+
+# WebView JavaScript bridges (reader editor, PDF/DOCX viewers). The methods are only called from
+# JavaScript by name, so R8 must keep them in release builds.
+-keepattributes JavascriptInterface
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}

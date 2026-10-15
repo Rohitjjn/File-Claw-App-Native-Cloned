@@ -112,6 +112,27 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.input.ImeAction
+import com.example.ui.component.HeadingItem
+import com.example.ui.reader.ReaderAppearanceSheet
+import com.example.ui.reader.ReaderAppearanceStore
+import com.example.ui.reader.ReaderController
+import com.example.ui.reader.ReaderDiscardDialog
+import com.example.ui.reader.ReaderDocumentView
+import com.example.ui.reader.ReaderEditMenuContent
+import com.example.ui.reader.ReaderEditMode
+import com.example.ui.reader.ReaderEditToolbarItems
+import com.example.ui.reader.ReaderHistorySheet
+import com.example.ui.reader.ReaderKind
+import com.example.ui.reader.ReaderLinkDialog
+import com.example.ui.reader.ReaderOutline
+import com.example.ui.reader.ReaderSaveCopyDialog
+import com.example.ui.reader.ReaderSaveDialog
+import com.example.ui.reader.ReaderTextStats
 
 private const val MAX_TEXT_PRINT_CHARS = 2_000_000
 
@@ -227,6 +248,116 @@ fun FilePreviewScreen(
 
     val context = LocalContext.current
     val printScope = rememberCoroutineScope()
+
+    // ---- Markdown / TXT reader: appearance, outline, in-place editing --------------------------
+    val readerKind: ReaderKind? = when (activeFile?.extension?.lowercase()) {
+        "md", "markdown" -> ReaderKind.MARKDOWN
+        "txt" -> ReaderKind.TEXT
+        else -> null
+    }
+    val isReaderDoc = readerKind != null
+    val readerController = remember(activeFile?.path) { ReaderController() }
+    var readerAppearance by remember { mutableStateOf(ReaderAppearanceStore.load(context)) }
+    LaunchedEffect(readerAppearance) {
+        delay(350)
+        ReaderAppearanceStore.save(context, readerAppearance)
+    }
+    val inlineEditSession by viewModel.inlineEdit.collectAsState()
+    val pendingInlineEditPath by viewModel.pendingInlineEditPath.collectAsState()
+    val editSession = inlineEditSession?.takeIf { isReaderDoc && it.path == activeFile?.path }
+    val isInlineEditing = editSession != null
+    val readerEditorState = readerController.editorState
+    var showEditMenu by remember { mutableStateOf(false) }
+    var showHistorySheet by remember { mutableStateOf(false) }
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    var showLinkDialog by remember { mutableStateOf(false) }
+    var showSaveCopyDialog by remember { mutableStateOf(false) }
+    var pendingSaveText by remember { mutableStateOf<String?>(null) }
+    var isSavingInline by remember { mutableStateOf(false) }
+    val currentTextContent = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
+    val hasUnsavedInlineChanges = isInlineEditing &&
+        (readerEditorState.dirty || (editSession != null && currentTextContent != null && editSession.text != currentTextContent))
+
+    // A session belongs to one file; drop it when another file is shown.
+    LaunchedEffect(activeFile?.path) {
+        val session = viewModel.inlineEdit.value
+        val path = activeFile?.path
+        if (session != null && path != null && session.path != path) viewModel.endInlineEdit()
+    }
+    // After the activity is recreated (rotation, theme change) continue from the latest draft.
+    LaunchedEffect(Unit) {
+        val session = viewModel.inlineEdit.value ?: return@LaunchedEffect
+        val draft = viewModel.inlineEditDraft(session.path)
+        if (draft != null && draft != session.text) viewModel.rebaseInlineEdit(session.path, draft, session.sourceMode)
+    }
+
+    val startInlineEdit: () -> Unit = {
+        val textState = fileState as? MainViewModel.FileContentState.TextSuccess
+        if (textState != null && readerKind != null) {
+            if (textState.editable) {
+                isSearchInDocumentOpen = false
+                inViewerSearchQuery = ""
+                isBarsVisible = true
+                viewModel.startInlineEdit(textState.file.path, textState.content, sourceMode = false)
+            } else {
+                android.widget.Toast.makeText(context, textState.readOnlyReason ?: "This file is too large to edit safely.", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    // "Edit on open" (Settings) for Markdown / TXT opens straight into in-place editing.
+    LaunchedEffect(fileState, pendingInlineEditPath) {
+        val textState = fileState as? MainViewModel.FileContentState.TextSuccess ?: return@LaunchedEffect
+        if (pendingInlineEditPath == textState.file.path && viewModel.consumeInlineEditRequest(textState.file.path)) {
+            if (readerKind != null && textState.editable) startInlineEdit()
+        }
+    }
+    val requestDiscardInlineEdit: () -> Unit = {
+        if (hasUnsavedInlineChanges) showDiscardDialog = true else viewModel.endInlineEdit()
+    }
+    val requestInlineSave: () -> Unit = {
+        if (!isSavingInline) {
+            readerController.requestContent { edited ->
+                val textState = fileState as? MainViewModel.FileContentState.TextSuccess
+                when {
+                    edited == null -> android.widget.Toast.makeText(context, "Couldn't read the edited text. Please try again.", android.widget.Toast.LENGTH_SHORT).show()
+                    textState == null -> Unit
+                    edited == textState.content -> {
+                        android.widget.Toast.makeText(context, "No changes to save", android.widget.Toast.LENGTH_SHORT).show()
+                        viewModel.endInlineEdit()
+                    }
+                    else -> {
+                        pendingSaveText = edited
+                        showSaveDialog = true
+                    }
+                }
+            }
+        }
+    }
+    val confirmInlineSave: () -> Unit = {
+        val edited = pendingSaveText
+        val textState = fileState as? MainViewModel.FileContentState.TextSuccess
+        showSaveDialog = false
+        if (edited != null && textState != null) {
+            isSavingInline = true
+            viewModel.saveTextFile(textState.file, edited) { saved ->
+                isSavingInline = false
+                pendingSaveText = null
+                if (saved) {
+                    readerController.finishEditKeepingChanges()
+                    viewModel.endInlineEdit()
+                }
+            }
+        }
+    }
+    val switchMarkdownSourceMode: () -> Unit = {
+        val session = editSession
+        if (session != null && readerKind == ReaderKind.MARKDOWN) {
+            readerController.requestContent { edited ->
+                if (edited != null) viewModel.rebaseInlineEdit(session.path, edited, !session.sourceMode)
+            }
+        }
+    }
 
     // Restore previously opened file state on recreate
     // Attempted once per screen instance (process-death recovery). Without the flag, "Remove from history"
@@ -353,6 +484,9 @@ fun FilePreviewScreen(
     androidx.activity.compose.BackHandler {
         handleBack()
     }
+    androidx.activity.compose.BackHandler(enabled = isInlineEditing) {
+        requestDiscardInlineEdit()
+    }
 
     val activity = context as? android.app.Activity
     val originalWindowBars = remember(activity) {
@@ -377,18 +511,24 @@ fun FilePreviewScreen(
             WindowCompat.setDecorFitsSystemWindows(window, false)
             val insetsController = WindowCompat.getInsetsController(window, window.decorView)
             insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            val isDarkCanvas = when (activeFile?.extension?.lowercase()) {
-                "pdf", "docx", "doc" -> isPdfNightMode
+            val readerResolved = readerKind?.let { readerAppearance.resolve(isDarkTheme, settings.fontSize, it) }
+            val isDarkCanvas = when {
+                readerResolved != null -> readerResolved.isDark
+                activeFile?.extension?.lowercase() in setOf("pdf", "docx", "doc") -> isPdfNightMode
                 else -> isDarkTheme
             }
-            val canvasColor = when (activeFile?.extension?.lowercase()) {
-                "pdf" -> if (isPdfNightMode) android.graphics.Color.rgb(24, 24, 24) else android.graphics.Color.rgb(240, 240, 240)
-                "docx", "doc" -> if (isPdfNightMode) android.graphics.Color.rgb(21, 21, 20) else android.graphics.Color.rgb(250, 249, 245)
+            val canvasColor = when {
+                readerResolved != null -> readerResolved.backgroundArgb
+                activeFile?.extension?.lowercase() == "pdf" -> if (isPdfNightMode) android.graphics.Color.rgb(24, 24, 24) else android.graphics.Color.rgb(240, 240, 240)
+                activeFile?.extension?.lowercase() in setOf("docx", "doc") -> if (isPdfNightMode) android.graphics.Color.rgb(21, 21, 20) else android.graphics.Color.rgb(250, 249, 245)
                 else -> if (isDarkTheme) android.graphics.Color.rgb(24, 23, 21) else android.graphics.Color.rgb(250, 249, 245)
             }
             window.decorView.setBackgroundColor(canvasColor)
-            insetsController.isAppearanceLightStatusBars = !isDarkCanvas
-            insetsController.isAppearanceLightNavigationBars = !isDarkCanvas
+            // With the bars shown, the strip behind the status/navigation bar is the app background;
+            // in focus mode it is the page. Icons must contrast with whichever is actually there.
+            val darkBehindBars = if (isBarsVisible) isDarkTheme else isDarkCanvas
+            insetsController.isAppearanceLightStatusBars = !darkBehindBars
+            insetsController.isAppearanceLightNavigationBars = !darkBehindBars
             if (!isBarsVisible) {
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                     window.attributes = window.attributes.apply {
@@ -406,18 +546,19 @@ fun FilePreviewScreen(
             }
         }
     }
+    val latestAppDarkTheme by rememberUpdatedState(isDarkTheme)
     DisposableEffect(activity) {
         onDispose {
             val window = activity?.window
             if (window != null) {
                 val insetsController = WindowCompat.getInsetsController(window, window.decorView)
                 insetsController.show(WindowInsetsCompat.Type.systemBars())
-                originalWindowBars?.let { (status, navigation, appearance) ->
+                originalWindowBars?.let { (status, navigation, _) ->
                     window.statusBarColor = status
                     window.navigationBarColor = navigation
-                    insetsController.isAppearanceLightStatusBars = appearance.first
-                    insetsController.isAppearanceLightNavigationBars = appearance.second
                 }
+                insetsController.isAppearanceLightStatusBars = !latestAppDarkTheme
+                insetsController.isAppearanceLightNavigationBars = !latestAppDarkTheme
                 if (originalSystemBarsBehavior != null) {
                     insetsController.systemBarsBehavior = originalSystemBarsBehavior
                 }
@@ -427,6 +568,20 @@ fun FilePreviewScreen(
                 window.decorView.background = originalDecorBackground
             }
         }
+    }
+
+    DisposableEffect(isInlineEditing, activity) {
+        val window = activity?.window
+        if (!isInlineEditing || window == null) return@DisposableEffect onDispose { }
+        val previousMode = window.attributes.softInputMode
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        onDispose { window.setSoftInputMode(previousMode) }
+    }
+
+    LaunchedEffect(scrollToLineNumber) {
+        val line = scrollToLineNumber ?: return@LaunchedEffect
+        if (isReaderDoc) readerController.scrollToLine(line)
+        scrollToLineNumber = null
     }
 
     Scaffold(
@@ -445,11 +600,20 @@ fun FilePreviewScreen(
 
                 ClaudeAppBar(
                     title = titleText,
-                    onNavIconClick = handleBack,
-                    navIcon = Icons.AutoMirrored.Filled.ArrowBack,
+                    subtitle = when {
+                        !isInlineEditing -> null
+                        isSavingInline -> "Saving\u2026"
+                        hasUnsavedInlineChanges -> if (editSession?.sourceMode == true) "Editing Markdown source \u2022 unsaved" else "Editing \u2022 unsaved changes"
+                        else -> if (editSession?.sourceMode == true) "Editing Markdown source" else "Editing"
+                    },
+                    onNavIconClick = if (isInlineEditing) requestDiscardInlineEdit else handleBack,
+                    navIcon = if (isInlineEditing) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack,
+                    navIconDescription = if (isInlineEditing) "Close editor" else "Back",
                     actions = {
+                        // Markdown / TXT keep only back, file name and the 3-dot menu up here; the
+                        // same actions live in the bottom tray.
                         val canSearchInDoc = activeFile?.extension?.lowercase() in setOf("pdf", "docx", "txt", "md")
-                        if (canSearchInDoc) {
+                        if (canSearchInDoc && !isReaderDoc) {
                             IconButton(onClick = { isSearchInDocumentOpen = !isSearchInDocumentOpen }) {
                                 Icon(
                                     imageVector = Icons.Outlined.Search,
@@ -461,7 +625,7 @@ fun FilePreviewScreen(
 
                         val extLower = activeFile?.extension?.lowercase() ?: ""
                         val hasOutline = extLower in setOf("md", "markdown", "docx", "doc", "txt", "pdf")
-                        if (hasOutline) {
+                        if (hasOutline && !isReaderDoc) {
                             IconButton(onClick = { showOutlineBottomSheet = true }) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Outlined.Toc,
@@ -471,18 +635,20 @@ fun FilePreviewScreen(
                             }
                         }
 
-                        // Focus Mode / Immersive Toggle
-                        IconButton(onClick = { isBarsVisible = !isBarsVisible }) {
-                            Icon(
-                                imageVector = if (isBarsVisible) Icons.Outlined.Fullscreen else Icons.Outlined.FullscreenExit,
-                                contentDescription = "Toggle Focus Mode",
-                                tint = MaterialTheme.colorScheme.onSurface
-                            )
+                        // Focus Mode / Immersive Toggle (Markdown / TXT: in the 3-dot menu)
+                        if (!isReaderDoc) {
+                            IconButton(onClick = { isBarsVisible = !isBarsVisible }) {
+                                Icon(
+                                    imageVector = if (isBarsVisible) Icons.Outlined.Fullscreen else Icons.Outlined.FullscreenExit,
+                                    contentDescription = "Toggle Focus Mode",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
 
                         val isTextState = fileState is MainViewModel.FileContentState.TextSuccess ||
                             (activeFile?.extension?.lowercase() in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv"))
-                        if (isTextState) {
+                        if (isTextState && !isReaderDoc) {
                             IconButton(onClick = {
                                 val textState = fileState as? MainViewModel.FileContentState.TextSuccess
                                 val entity = activeFile
@@ -513,6 +679,40 @@ fun FilePreviewScreen(
                                 expanded = showMenu,
                                 onDismissRequest = { showMenu = false }
                             ) {
+                                if (isInlineEditing) {
+                                    val plainEditing = readerKind == ReaderKind.TEXT || editSession?.sourceMode == true
+                                    ReaderEditMenuContent(
+                                        kind = if (editSession?.sourceMode == true) ReaderKind.MARKDOWN_SOURCE else (readerKind ?: ReaderKind.TEXT),
+                                        plainMode = plainEditing,
+                                        onCommand = { command ->
+                                            showMenu = false
+                                            readerController.command(command)
+                                        },
+                                        onInsertLink = {
+                                            showMenu = false
+                                            showLinkDialog = true
+                                        },
+                                        onInsertDateTime = {
+                                            showMenu = false
+                                            val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+                                            readerController.command("insertText", stamp)
+                                        },
+                                        onToggleSource = if (readerKind == ReaderKind.MARKDOWN) {
+                                            {
+                                                showMenu = false
+                                                switchMarkdownSourceMode()
+                                            }
+                                        } else null,
+                                        onSaveCopy = {
+                                            showMenu = false
+                                            showSaveCopyDialog = true
+                                        },
+                                        onDiscard = {
+                                            showMenu = false
+                                            requestDiscardInlineEdit()
+                                        }
+                                    )
+                                } else {
                                 DropdownMenuItem(
                                     text = { Text("Share file") },
                                     onClick = {
@@ -624,6 +824,22 @@ fun FilePreviewScreen(
                                     )
                                 }
 
+                                if (isReaderDoc) {
+                                    DropdownMenuItem(
+                                        text = { Text("Focus mode") },
+                                        onClick = {
+                                            showMenu = false
+                                            isBarsVisible = false
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Fullscreen,
+                                                contentDescription = "Focus mode"
+                                            )
+                                        }
+                                    )
+                                }
+
                                 DropdownMenuItem(
                                     text = { Text("Print / Export as PDF") },
                                     onClick = {
@@ -719,6 +935,7 @@ fun FilePreviewScreen(
                                         )
                                     }
                                 )
+                                }
                             }
                         }
                     }
@@ -743,7 +960,11 @@ fun FilePreviewScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .navigationBarsPadding()
+                            .then(
+                                // While editing the tray rides on top of the keyboard.
+                                if (isInlineEditing) Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                                else Modifier.navigationBarsPadding()
+                            )
                             .padding(bottom = 12.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -1005,6 +1226,19 @@ fun FilePreviewScreen(
                                             tint = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
+                                } else if (isText && isInlineEditing) {
+                                    // Edit mode replaces the preview tray in place.
+                                    ReaderEditToolbarItems(
+                                        state = readerEditorState,
+                                        saving = isSavingInline,
+                                        onUndo = { readerController.undo() },
+                                        onRedo = { readerController.redo() },
+                                        onTab = { readerController.tab() },
+                                        onBold = { readerController.bold() },
+                                        onItalic = { readerController.italic() },
+                                        onSave = requestInlineSave,
+                                        onHistory = { showHistorySheet = true }
+                                    )
                                 } else if (isText) {
                                     // Find in Text
                                     IconButton(
@@ -1104,7 +1338,10 @@ fun FilePreviewScreen(
                                         Surface(
                                             shape = RoundedCornerShape(18.dp),
                                             color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.clickable { onNavigateToEditor() }
+                                            modifier = Modifier.clickable {
+                                                // Markdown / TXT turn editable right here; other text types keep the editor screen.
+                                                if (isReaderDoc) startInlineEdit() else onNavigateToEditor()
+                                            }
                                         ) {
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
@@ -1165,206 +1402,6 @@ fun FilePreviewScreen(
                     if (isBarsVisible) it.padding(innerPadding) else it
                 }
         ) {
-            // Subtle Floating Back & Exit Pill when !isBarsVisible (Focus mode)
-            androidx.compose.animation.AnimatedVisibility(
-                visible = !isBarsVisible,
-                enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { -it },
-                exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { -it },
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .statusBarsPadding()
-                    .padding(16.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
-                    shadowElevation = 6.dp
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        IconButton(
-                            onClick = handleBack,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(4.dp))
-                        IconButton(
-                            onClick = { isBarsVisible = true },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                Icons.Outlined.FullscreenExit,
-                                contentDescription = "Exit Focus Mode",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Floating In-Viewer Search Bar Overlay
-            androidx.compose.animation.AnimatedVisibility(
-                visible = isSearchInDocumentOpen && isBarsVisible,
-                enter = androidx.compose.animation.slideInVertically { -it } + androidx.compose.animation.fadeIn(),
-                exit = androidx.compose.animation.slideOutVertically { -it } + androidx.compose.animation.fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .then(if (isBarsVisible) Modifier.statusBarsPadding() else Modifier)
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .fillMaxWidth()
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
-                    shadowElevation = 8.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                            .height(44.dp)
-                    ) {
-                        Icon(
-                            Icons.Outlined.Search,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                            if (inViewerSearchQuery.isEmpty()) {
-                                Text(
-                                    "Find in document...",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
-                                )
-                            }
-                            androidx.compose.foundation.text.BasicTextField(
-                                value = inViewerSearchQuery,
-                                onValueChange = {
-                                    inViewerSearchQuery = it
-                                    currentMatchIndex = 0
-                                    totalMatchesCount = 0
-                                    searchResultsTruncated = false
-                                    pdfSearchError = null
-                                    largeTextSearchMatches = emptyList()
-                                    largeTextSearchCompletedQuery = ""
-                                    largeTextSearchError = null
-                                    if (fileState is MainViewModel.FileContentState.PdfSuccess) {
-                                        isPdfSearchLoading = it.isNotBlank()
-                                        pdfSearchSnapshot = PdfSearchSnapshot()
-                                    }
-                                },
-                                singleLine = true,
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
-                                cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-
-                        if (inViewerSearchQuery.isNotEmpty()) {
-                            val isPdfSearch = fileState is MainViewModel.FileContentState.PdfSuccess
-                            val extension = activeFile?.extension?.lowercase()
-                            val navigableMatchCount = when {
-                                isPdfSearch -> pdfSearchSnapshot.matches.size
-                                isLargeTextSearchable -> largeTextSearchMatches.size
-                                extension in setOf("docx", "doc") -> minOf(totalMatchesCount, 5_000)
-                                extension in setOf("txt", "md") -> minOf(totalMatchesCount, 1_000)
-                                else -> totalMatchesCount
-                            }
-                            val pageInfo = if (isPdfSearch) {
-                                pdfSearchSnapshot.matches.getOrNull(currentMatchIndex)?.pageNumber?.let { " (p.$it)" }.orEmpty()
-                            } else ""
-                            val matchLabel = when {
-                                isPdfSearchLoading -> "Searching…"
-                                isFullTextLoading -> "Searching full file…"
-                                (pdfSearchError != null && isPdfSearch) || (largeTextSearchError != null && isLargeTextSearchable) -> "Search unavailable"
-                                totalMatchesCount > 0 && searchResultsTruncated -> "${currentMatchIndex + 1}/$navigableMatchCount of $totalMatchesCount$pageInfo"
-                                totalMatchesCount > 0 -> "${currentMatchIndex + 1}/$totalMatchesCount$pageInfo"
-                                else -> "0 matches"
-                            }
-
-                            Text(
-                                text = matchLabel,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                modifier = Modifier.padding(horizontal = 4.dp)
-                            )
-
-                            IconButton(
-                                onClick = {
-                                    if (isPdfSearch) {
-                                        val matches = pdfSearchSnapshot.matches
-                                        if (matches.isNotEmpty()) {
-                                            currentMatchIndex = (currentMatchIndex - 1 + matches.size) % matches.size
-                                            scrollToPage = matches[currentMatchIndex].pageNumber - 1
-                                        }
-                                    } else if (isLargeTextSearchable) {
-                                        if (largeTextSearchMatches.isNotEmpty()) {
-                                            currentMatchIndex = (currentMatchIndex - 1 + largeTextSearchMatches.size) % largeTextSearchMatches.size
-                                        }
-                                    } else {
-                                        searchTriggerPrev++
-                                    }
-                                },
-                                enabled = totalMatchesCount > 0 && !isPdfSearchLoading,
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous match", modifier = Modifier.size(18.dp))
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    if (isPdfSearch) {
-                                        val matches = pdfSearchSnapshot.matches
-                                        if (matches.isNotEmpty()) {
-                                            currentMatchIndex = (currentMatchIndex + 1) % matches.size
-                                            scrollToPage = matches[currentMatchIndex].pageNumber - 1
-                                        }
-                                    } else if (isLargeTextSearchable) {
-                                        if (largeTextSearchMatches.isNotEmpty()) {
-                                            currentMatchIndex = (currentMatchIndex + 1) % largeTextSearchMatches.size
-                                        }
-                                    } else {
-                                        searchTriggerNext++
-                                    }
-                                },
-                                enabled = totalMatchesCount > 0 && !isPdfSearchLoading,
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next match", modifier = Modifier.size(18.dp))
-                            }
-                        }
-
-                        IconButton(
-                            onClick = {
-                                isSearchInDocumentOpen = false
-                                inViewerSearchQuery = ""
-                                pdfSearchSnapshot = PdfSearchSnapshot()
-                                isPdfSearchLoading = false
-                                searchResultsTruncated = false
-                                totalMatchesCount = 0
-                                currentMatchIndex = 0
-                            },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = "Close search", modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
-            }
             when (val state = fileState) {
                 is MainViewModel.FileContentState.Loading -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1463,41 +1500,52 @@ fun FilePreviewScreen(
                         }
                         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                             when (state.file.extension.lowercase()) {
-                                "md" -> MarkdownPreview(
-                                    markdownText = completeContent,
-                                    fileEntity = state.file,
-                                    fontSizeSetting = settings.fontSize,
-                                    isNightMode = isDarkTheme,
-                                    searchQuery = inViewerSearchQuery,
-                                    searchTriggerNext = searchTriggerNext,
-                                    searchTriggerPrev = searchTriggerPrev,
-                                    onSearchResultCount = { count, index, truncated ->
-                                        if (!isLargeTextSearchable) {
-                                            totalMatchesCount = count
-                                            currentMatchIndex = if (count > 0) index.coerceAtLeast(0) else 0
-                                            searchResultsTruncated = truncated
-                                        }
-                                    },
-                                    onSingleTap = { isBarsVisible = !isBarsVisible },
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                                "txt" -> PlainTextPreview(
-                                    content = completeContent,
-                                    isDarkMode = isDarkTheme,
-                                    fontSizeSetting = settings.fontSize,
-                                    searchQuery = inViewerSearchQuery,
-                                    searchTriggerNext = searchTriggerNext,
-                                    searchTriggerPrev = searchTriggerPrev,
-                                    onSearchResultCount = { count, index, truncated ->
-                                        if (!isLargeTextSearchable) {
-                                            totalMatchesCount = count
-                                            currentMatchIndex = if (count > 0) index.coerceAtLeast(0) else 0
-                                            searchResultsTruncated = truncated
-                                        }
-                                    },
-                                    onSingleTap = { isBarsVisible = !isBarsVisible },
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                                "md", "markdown", "txt" -> {
+                                    val sourceMode = editSession?.sourceMode == true
+                                    val pageKind = when {
+                                        sourceMode -> ReaderKind.MARKDOWN_SOURCE
+                                        readerKind == ReaderKind.MARKDOWN -> ReaderKind.MARKDOWN
+                                        else -> ReaderKind.TEXT
+                                    }
+                                    // One page (WebView) per document: keyed by the per-file controller.
+                                    androidx.compose.runtime.key(readerController) {
+                                    ReaderDocumentView(
+                                        documentKey = state.file.path,
+                                        kind = pageKind,
+                                        text = editSession?.text ?: completeContent,
+                                        appearance = readerAppearance,
+                                        appDark = isDarkTheme,
+                                        appFontSetting = settings.fontSize,
+                                        tabSize = settings.tabSize,
+                                        controller = readerController,
+                                        editMode = when {
+                                            editSession == null -> null
+                                            pageKind == ReaderKind.MARKDOWN -> ReaderEditMode.RICH
+                                            else -> ReaderEditMode.PLAIN
+                                        },
+                                        searchQuery = if (isInlineEditing) "" else inViewerSearchQuery,
+                                        searchTriggerNext = searchTriggerNext,
+                                        searchTriggerPrev = searchTriggerPrev,
+                                        onSearchResultCount = { count, index, truncated ->
+                                            if (!isLargeTextSearchable) {
+                                                totalMatchesCount = count
+                                                currentMatchIndex = if (count > 0) index.coerceAtLeast(0) else 0
+                                                searchResultsTruncated = truncated
+                                            }
+                                        },
+                                        onSingleTap = { if (!isInlineEditing) isBarsVisible = !isBarsVisible },
+                                        onLinkClicked = { url -> if (!isInlineEditing) pendingLinkToOpen = url },
+                                        onCopyText = { copied ->
+                                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                            clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Code", copied))
+                                            android.widget.Toast.makeText(context, "Code block copied", android.widget.Toast.LENGTH_SHORT).show()
+                                        },
+                                        onDraftChanged = { draft -> viewModel.updateInlineEditDraft(state.file.path, draft) },
+                                        onShortcut = { name -> if (name == "save" && isInlineEditing) requestInlineSave() },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                    }
+                                }
                                 else -> WebViewPreview(
                                     fileEntity = state.file,
                                     allowScripts = htmlScriptsEnabled,
@@ -1643,7 +1691,341 @@ fun FilePreviewScreen(
                     }
                 }
             }
+
+            // Overlays are drawn after the document so they sit on top of WebView-based viewers
+            // (previously the search bar and the focus-mode pill were hidden underneath them).
+            // Subtle Floating Back & Exit Pill when !isBarsVisible (Focus mode)
+            androidx.compose.animation.AnimatedVisibility(
+                visible = !isBarsVisible,
+                enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { -it },
+                exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { -it },
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(16.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                    shadowElevation = 6.dp
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        IconButton(
+                            onClick = handleBack,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        IconButton(
+                            onClick = { isBarsVisible = true },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Outlined.FullscreenExit,
+                                contentDescription = "Exit Focus Mode",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Floating In-Viewer Search Bar Overlay
+            val searchFocusRequester = remember { FocusRequester() }
+            val searchNextAction: () -> Unit = {
+                if (fileState is MainViewModel.FileContentState.PdfSuccess) {
+                    val matches = pdfSearchSnapshot.matches
+                    if (matches.isNotEmpty()) {
+                        currentMatchIndex = (currentMatchIndex + 1) % matches.size
+                        scrollToPage = matches[currentMatchIndex].pageNumber - 1
+                    }
+                } else if (isLargeTextSearchable) {
+                    if (largeTextSearchMatches.isNotEmpty()) {
+                        currentMatchIndex = (currentMatchIndex + 1) % largeTextSearchMatches.size
+                    }
+                } else {
+                    searchTriggerNext++
+                }
+            }
+            LaunchedEffect(isSearchInDocumentOpen) {
+                if (isSearchInDocumentOpen) {
+                    delay(180)
+                    runCatching { searchFocusRequester.requestFocus() }
+                }
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = isSearchInDocumentOpen && isBarsVisible && !isInlineEditing,
+                enter = androidx.compose.animation.slideInVertically { -it } + androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.slideOutVertically { -it } + androidx.compose.animation.fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .fillMaxWidth()
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .height(44.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            if (inViewerSearchQuery.isEmpty()) {
+                                Text(
+                                    "Find in document...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                                )
+                            }
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = inViewerSearchQuery,
+                                onValueChange = {
+                                    inViewerSearchQuery = it
+                                    currentMatchIndex = 0
+                                    totalMatchesCount = 0
+                                    searchResultsTruncated = false
+                                    pdfSearchError = null
+                                    largeTextSearchMatches = emptyList()
+                                    largeTextSearchCompletedQuery = ""
+                                    largeTextSearchError = null
+                                    if (fileState is MainViewModel.FileContentState.PdfSuccess) {
+                                        isPdfSearchLoading = it.isNotBlank()
+                                        pdfSearchSnapshot = PdfSearchSnapshot()
+                                    }
+                                },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                                cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = { searchNextAction() }),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(searchFocusRequester)
+                                    .testTag("in_document_search_field")
+                            )
+                        }
+
+                        if (inViewerSearchQuery.isNotEmpty()) {
+                            val isPdfSearch = fileState is MainViewModel.FileContentState.PdfSuccess
+                            val extension = activeFile?.extension?.lowercase()
+                            val navigableMatchCount = when {
+                                isPdfSearch -> pdfSearchSnapshot.matches.size
+                                isLargeTextSearchable -> largeTextSearchMatches.size
+                                extension in setOf("docx", "doc") -> minOf(totalMatchesCount, 5_000)
+                                extension in setOf("txt", "md") -> minOf(totalMatchesCount, 1_000)
+                                else -> totalMatchesCount
+                            }
+                            val pageInfo = if (isPdfSearch) {
+                                pdfSearchSnapshot.matches.getOrNull(currentMatchIndex)?.pageNumber?.let { " (p.$it)" }.orEmpty()
+                            } else ""
+                            val matchLabel = when {
+                                isPdfSearchLoading -> "Searching…"
+                                isFullTextLoading -> "Searching full file…"
+                                (pdfSearchError != null && isPdfSearch) || (largeTextSearchError != null && isLargeTextSearchable) -> "Search unavailable"
+                                totalMatchesCount > 0 && searchResultsTruncated -> "${currentMatchIndex + 1}/$navigableMatchCount of $totalMatchesCount$pageInfo"
+                                totalMatchesCount > 0 -> "${currentMatchIndex + 1}/$totalMatchesCount$pageInfo"
+                                else -> "0 matches"
+                            }
+
+                            Text(
+                                text = matchLabel,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+
+                            IconButton(
+                                onClick = {
+                                    if (isPdfSearch) {
+                                        val matches = pdfSearchSnapshot.matches
+                                        if (matches.isNotEmpty()) {
+                                            currentMatchIndex = (currentMatchIndex - 1 + matches.size) % matches.size
+                                            scrollToPage = matches[currentMatchIndex].pageNumber - 1
+                                        }
+                                    } else if (isLargeTextSearchable) {
+                                        if (largeTextSearchMatches.isNotEmpty()) {
+                                            currentMatchIndex = (currentMatchIndex - 1 + largeTextSearchMatches.size) % largeTextSearchMatches.size
+                                        }
+                                    } else {
+                                        searchTriggerPrev++
+                                    }
+                                },
+                                enabled = totalMatchesCount > 0 && !isPdfSearchLoading,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous match", modifier = Modifier.size(18.dp))
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    if (isPdfSearch) {
+                                        val matches = pdfSearchSnapshot.matches
+                                        if (matches.isNotEmpty()) {
+                                            currentMatchIndex = (currentMatchIndex + 1) % matches.size
+                                            scrollToPage = matches[currentMatchIndex].pageNumber - 1
+                                        }
+                                    } else if (isLargeTextSearchable) {
+                                        if (largeTextSearchMatches.isNotEmpty()) {
+                                            currentMatchIndex = (currentMatchIndex + 1) % largeTextSearchMatches.size
+                                        }
+                                    } else {
+                                        searchTriggerNext++
+                                    }
+                                },
+                                enabled = totalMatchesCount > 0 && !isPdfSearchLoading,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next match", modifier = Modifier.size(18.dp))
+                            }
+                        }
+
+                        IconButton(
+                            onClick = {
+                                isSearchInDocumentOpen = false
+                                inViewerSearchQuery = ""
+                                pdfSearchSnapshot = PdfSearchSnapshot()
+                                isPdfSearchLoading = false
+                                searchResultsTruncated = false
+                                totalMatchesCount = 0
+                                currentMatchIndex = 0
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Close search", modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    // ---- Markdown / TXT: outline, appearance, edit history and edit dialogs -------------------
+    if (showOutlineBottomSheet && readerKind != null) {
+        val outlineSource = editSession?.text ?: fullPreviewText ?: currentTextContent.orEmpty()
+        val outlineHeadings by produceState<List<HeadingItem>?>(initialValue = null, outlineSource, readerKind) {
+            value = withContext(Dispatchers.Default) {
+                if (readerKind == ReaderKind.MARKDOWN) ReaderOutline.markdown(outlineSource) else ReaderOutline.plainText(outlineSource)
+            }
+        }
+        DocumentOutlineBottomSheet(
+            headings = outlineHeadings.orEmpty(),
+            documentTitle = activeFile?.name.orEmpty(),
+            emptyHint = when {
+                outlineHeadings == null -> "Reading the document\u2026"
+                readerKind == ReaderKind.MARKDOWN -> "Add headings such as \"# Title\" or \"## Section\" to build an outline."
+                else -> "Lines like \"# Title\", underlined titles, \"Chapter 1\" or short ALL CAPS titles appear here."
+            },
+            onDismissRequest = { showOutlineBottomSheet = false },
+            onSelectHeading = { heading ->
+                val richPage = readerKind == ReaderKind.MARKDOWN && editSession?.sourceMode != true
+                if (richPage && heading.sourceOffset >= 0) {
+                    readerController.scrollToHeading(heading.sourceOffset)
+                } else {
+                    readerController.scrollToLine(heading.lineNumber)
+                }
+            }
+        )
+    }
+
+    if (showAppearanceBottomSheet && readerKind != null) {
+        ReaderAppearanceSheet(
+            appearance = readerAppearance,
+            kind = readerKind,
+            appFontSetting = settings.fontSize,
+            onChange = { readerAppearance = it },
+            onDismissRequest = { showAppearanceBottomSheet = false }
+        )
+    }
+
+    if (showHistorySheet && isInlineEditing) {
+        ReaderHistorySheet(
+            state = readerEditorState,
+            onJump = { index -> readerController.jumpToHistory(index) },
+            onDismissRequest = { showHistorySheet = false }
+        )
+    }
+
+    val textAwaitingSave = pendingSaveText
+    if (showSaveDialog && textAwaitingSave != null) {
+        val summary = remember(textAwaitingSave, currentTextContent) {
+            ReaderTextStats.summarize(currentTextContent.orEmpty(), textAwaitingSave)
+        }
+        ReaderSaveDialog(
+            fileName = activeFile?.name.orEmpty(),
+            summary = summary,
+            onConfirm = confirmInlineSave,
+            onDismiss = {
+                showSaveDialog = false
+                pendingSaveText = null
+            }
+        )
+    }
+
+    if (showDiscardDialog) {
+        ReaderDiscardDialog(
+            fileName = activeFile?.name.orEmpty(),
+            onDiscard = {
+                showDiscardDialog = false
+                viewModel.endInlineEdit()
+            },
+            onKeepEditing = { showDiscardDialog = false }
+        )
+    }
+
+    if (showLinkDialog) {
+        ReaderLinkDialog(
+            onInsert = { url, label ->
+                showLinkDialog = false
+                val payload = org.json.JSONObject().put("url", url).put("text", label).toString()
+                readerController.command("link", payload)
+            },
+            onDismiss = { showLinkDialog = false }
+        )
+    }
+
+    if (showSaveCopyDialog && activeFile != null) {
+        val copyName = remember(activeFile.name) {
+            val dot = activeFile.name.lastIndexOf('.')
+            if (dot > 0) activeFile.name.substring(0, dot) + "_copy" + activeFile.name.substring(dot) else activeFile.name + "_copy"
+        }
+        ReaderSaveCopyDialog(
+            defaultName = copyName,
+            onSave = { name ->
+                showSaveCopyDialog = false
+                readerController.requestContent { edited ->
+                    if (edited != null) {
+                        viewModel.exportCopy(activeFile, name, edited)
+                    } else {
+                        android.widget.Toast.makeText(context, "Couldn't read the edited text. Please try again.", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onDismiss = { showSaveCopyDialog = false }
+        )
     }
 
     // Glassmorphism Modal Bottom Sheet for File Properties

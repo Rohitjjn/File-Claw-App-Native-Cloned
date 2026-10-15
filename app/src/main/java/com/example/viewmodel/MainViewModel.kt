@@ -740,8 +740,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun saveTextFile(fileEntity: RecentFileEntity, newContent: String) {
+    /**
+     * Writes [newContent] to the file. [onResult] (optional) is called on the main thread with true
+     * once the file and the in-memory state are updated, or false when nothing was written.
+     */
+    fun saveTextFile(fileEntity: RecentFileEntity, newContent: String, onResult: ((Boolean) -> Unit)? = null) {
         viewModelScope.launch(Dispatchers.IO) {
+            var saved = false
             try {
                 val current = (_currentFileState.value as? FileContentState.TextSuccess)
                     ?.takeIf { it.file.path == fileEntity.path }
@@ -785,10 +790,69 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } else if (settingsState.value.notificationSaveComplete) {
                     _fileEvent.value = "Saved successfully!"
                 }
+                saved = true
             } catch (e: Exception) {
                 _fileEvent.value = "Error saving file: ${e.message}"
+            } finally {
+                if (onResult != null) {
+                    val result = saved
+                    withContext(Dispatchers.Main) { onResult(result) }
+                }
             }
         }
+    }
+
+    // ---- In-place editing of Markdown / TXT (FilePreviewScreen) ---------------------------------
+
+    /**
+     * An in-place editing session. [text] is what the editor page was built from (the file content,
+     * or a restored draft / mode switch); [sourceMode] edits raw Markdown instead of the rich view.
+     */
+    data class InlineEditSession(val path: String, val text: String, val sourceMode: Boolean)
+
+    private val _inlineEdit = MutableStateFlow<InlineEditSession?>(null)
+    val inlineEdit: StateFlow<InlineEditSession?> = _inlineEdit.asStateFlow()
+
+    /** Latest editor text pushed by the page (debounced). Survives rotation; not observed by the UI. */
+    @Volatile
+    private var inlineDraft: Pair<String, String>? = null
+
+    private val _pendingInlineEditPath = MutableStateFlow<String?>(null)
+    val pendingInlineEditPath: StateFlow<String?> = _pendingInlineEditPath.asStateFlow()
+
+    fun startInlineEdit(path: String, text: String, sourceMode: Boolean = false) {
+        inlineDraft = null
+        _inlineEdit.value = InlineEditSession(path, text, sourceMode)
+    }
+
+    /** Rebuilds the editor from [text] (switching rich/source mode or restoring a draft). */
+    fun rebaseInlineEdit(path: String, text: String, sourceMode: Boolean) {
+        val current = _inlineEdit.value
+        if (current == null || current.path != path) return
+        inlineDraft = null
+        _inlineEdit.value = InlineEditSession(path, text, sourceMode)
+    }
+
+    fun updateInlineEditDraft(path: String, text: String) {
+        if (_inlineEdit.value?.path == path) inlineDraft = path to text
+    }
+
+    fun inlineEditDraft(path: String): String? = inlineDraft?.takeIf { it.first == path }?.second
+
+    fun endInlineEdit() {
+        inlineDraft = null
+        _inlineEdit.value = null
+    }
+
+    /** Asks the preview screen to open [path] straight into in-place editing ("Edit on open"). */
+    fun requestInlineEditOnOpen(path: String) {
+        _pendingInlineEditPath.value = path
+    }
+
+    fun consumeInlineEditRequest(path: String): Boolean {
+        if (_pendingInlineEditPath.value != path) return false
+        _pendingInlineEditPath.value = null
+        return true
     }
 
     /**

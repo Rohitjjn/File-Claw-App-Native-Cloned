@@ -3,6 +3,7 @@ package com.example
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -42,6 +43,7 @@ import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.SearchScreen
 import com.example.ui.theme.FilesClawTheme
+import com.example.ui.theme.isAppInDarkTheme
 import com.example.viewmodel.MainViewModel
 import kotlinx.coroutines.flow.first
 
@@ -154,6 +156,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // Status and navigation bar icons follow the app theme, not only the phone's night mode.
+            // enableEdgeToEdge() alone picks icon colours from the system setting, so a Light app on a
+            // phone in dark mode got white icons on a white bar (and the reverse for Dark).
+            val appDarkTheme = isAppInDarkTheme(settings.theme)
+            DisposableEffect(appDarkTheme) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT
+                    ) { appDarkTheme },
+                    navigationBarStyle = SystemBarStyle.auto(LIGHT_NAV_SCRIM, DARK_NAV_SCRIM) { appDarkTheme }
+                )
+                onDispose { }
+            }
+
             FilesClawTheme(themeSetting = settings.theme) {
                 if (!hasPermissions) {
                     val isManageAllFilesRequired = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R
@@ -226,7 +243,13 @@ class MainActivity : ComponentActivity() {
                                     }
                                     if (lastFile != null) {
                                         mainViewModel.openFile(lastFile)
-                                        if (lastFile.extension.lowercase() == "txt" && settings.defaultToEditOnOpen) {
+                                        if (lastFile.extension.lowercase() in INLINE_EDIT_EXTENSIONS && settings.defaultToEditOnOpen) {
+                                            // Markdown / TXT edit in place on the preview screen.
+                                            mainViewModel.requestInlineEditOnOpen(lastFile.path)
+                                            navController.navigate("preview") {
+                                                launchSingleTop = true
+                                            }
+                                        } else if (lastFile.extension.lowercase() == "txt" && settings.defaultToEditOnOpen) {
                                             navController.navigate("editor") {
                                                 launchSingleTop = true
                                             }
@@ -257,7 +280,12 @@ class MainActivity : ComponentActivity() {
                         val fileState = mainViewModel.currentFileState.value
                         val currentRoute = navController.currentBackStackEntry?.destination?.route
                         if (currentRoute != "preview" && currentRoute != "editor") {
-                            if (fileState.opensInEditor() && settings.defaultToEditOnOpen) {
+                            if (fileState.opensInEditor() && settings.defaultToEditOnOpen && fileState.editsInPlace()) {
+                                fileState.fileOrNull?.let { mainViewModel.requestInlineEditOnOpen(it.path) }
+                                navController.navigate("preview") {
+                                    launchSingleTop = true
+                                }
+                            } else if (fileState.opensInEditor() && settings.defaultToEditOnOpen) {
                                 navController.navigate("editor") {
                                     launchSingleTop = true
                                 }
@@ -276,7 +304,12 @@ class MainActivity : ComponentActivity() {
                                 is MainViewModel.NavigationEvent.NavigateToPreview -> {
                                     val currentRoute = navController.currentBackStackEntry?.destination?.route
                                     if (currentRoute != "preview" && currentRoute != "editor") {
-                                        if (event.fileState.opensInEditor() && settings.defaultToEditOnOpen) {
+                                        if (event.fileState.opensInEditor() && settings.defaultToEditOnOpen && event.fileState.editsInPlace()) {
+                                            event.fileState.fileOrNull?.let { mainViewModel.requestInlineEditOnOpen(it.path) }
+                                            navController.navigate("preview") {
+                                                launchSingleTop = true
+                                            }
+                                        } else if (event.fileState.opensInEditor() && settings.defaultToEditOnOpen) {
                                             navController.navigate("editor") {
                                                 launchSingleTop = true
                                             }
@@ -286,9 +319,14 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
                                     } else if (currentRoute == "preview" && event.fileState.opensInEditor() && settings.defaultToEditOnOpen) {
-                                        navController.navigate("editor") {
-                                            popUpTo("preview") { inclusive = true }
-                                            launchSingleTop = true
+                                        if (event.fileState.editsInPlace()) {
+                                            // Markdown / TXT: the preview screen itself becomes the editor.
+                                            event.fileState.fileOrNull?.let { mainViewModel.requestInlineEditOnOpen(it.path) }
+                                        } else {
+                                            navController.navigate("editor") {
+                                                popUpTo("preview") { inclusive = true }
+                                                launchSingleTop = true
+                                            }
                                         }
                                     }
                                 }
@@ -550,3 +588,13 @@ fun PermissionGateScreen(
 /** Only fully loaded, writable text files go straight into the editor; truncated or converted views stay read-only. */
 private fun MainViewModel.FileContentState.opensInEditor(): Boolean =
     this is MainViewModel.FileContentState.TextSuccess && this.editable
+
+/** Markdown and TXT are edited in place on the preview screen instead of the separate editor. */
+private val INLINE_EDIT_EXTENSIONS = setOf("md", "markdown", "txt")
+
+private fun MainViewModel.FileContentState.editsInPlace(): Boolean =
+    this is MainViewModel.FileContentState.TextSuccess && this.file.extension.lowercase() in INLINE_EDIT_EXTENSIONS
+
+/** Default navigation-bar scrims used by androidx.activity for 3-button navigation. */
+private val LIGHT_NAV_SCRIM = android.graphics.Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
+private val DARK_NAV_SCRIM = android.graphics.Color.argb(0x80, 0x1b, 0x1b, 0x1b)

@@ -44,7 +44,9 @@ fun ClaudeAppBar(
     onNavIconClick: (() -> Unit)? = null,
     navIcon: ImageVector? = Icons.Default.Menu,
     actions: @Composable RowScope.() -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    navIconDescription: String = "Navigation Menu"
 ) {
     val glass = com.example.ui.theme.LocalGlass.current
     Surface(
@@ -56,20 +58,31 @@ fun ClaudeAppBar(
         Column {
             TopAppBar(
                 title = {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Column {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (subtitle != null) {
+                            Text(
+                                text = subtitle,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 },
                 navigationIcon = {
                     if (onNavIconClick != null && navIcon != null) {
                         IconButton(onClick = onNavIconClick, modifier = Modifier.testTag("app_bar_nav_icon")) {
                             Icon(
                                 imageVector = navIcon,
-                                contentDescription = "Navigation Menu",
+                                contentDescription = navIconDescription,
                                 tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
