@@ -3,6 +3,17 @@ package com.example.utils
 import android.content.Context
 import android.print.PrintAttributes
 import android.print.PrintManager
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
+import android.print.PageRange
+import android.os.CancellationSignal
+import android.os.ParcelFileDescriptor
+import android.graphics.pdf.PdfDocument
+import android.graphics.pdf.PdfRenderer
+import android.graphics.Bitmap
+import android.graphics.RectF
+import android.graphics.Matrix
+import android.os.Bundle
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import java.io.File
@@ -12,6 +23,143 @@ import java.io.File
  * Works 100% offline to print or save documents as PDF.
  */
 object FilePrintHelper {
+
+    /**
+     * Prints the original PDF pages through Android's print framework. It rasterizes one
+     * page at a time to keep memory bounded and never treats PDF bytes as plain text.
+     */
+    fun printPdf(context: Context, pdfFile: File, title: String) {
+        val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
+        if (printManager == null || !pdfFile.isFile || !pdfFile.canRead()) {
+            android.widget.Toast.makeText(context, "PDF cannot be opened for printing.", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        val adapter = object : PrintDocumentAdapter() {
+            private var pageCount = 0
+            private var pageSize = android.util.Size(595, 842)
+
+            override fun onLayout(
+                oldAttributes: PrintAttributes?,
+                newAttributes: PrintAttributes,
+                cancellationSignal: CancellationSignal,
+                callback: LayoutResultCallback,
+                extras: Bundle?
+            ) {
+                if (cancellationSignal.isCanceled) {
+                    callback.onLayoutCancelled()
+                    return
+                }
+                try {
+                    ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                        PdfRenderer(descriptor).use { renderer ->
+                            pageCount = renderer.pageCount
+                            if (pageCount == 0) {
+                                callback.onLayoutFailed("This PDF has no printable pages.")
+                                return
+                            }
+                        }
+                    }
+                    val media = newAttributes.mediaSize
+                    if (media != null) pageSize = android.util.Size((media.widthMils * 72 / 1000).coerceAtLeast(1), (media.heightMils * 72 / 1000).coerceAtLeast(1))
+                    callback.onLayoutFinished(
+                        PrintDocumentInfo.Builder(title)
+                            .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                            .setPageCount(pageCount)
+                            .build(),
+                        oldAttributes != newAttributes
+                    )
+                } catch (e: Exception) {
+                    callback.onLayoutFailed("Unable to read PDF: ${e.localizedMessage ?: "unknown error"}")
+                }
+            }
+
+            override fun onWrite(
+                pages: Array<out PageRange>,
+                destination: ParcelFileDescriptor,
+                cancellationSignal: CancellationSignal,
+                callback: WriteResultCallback
+            ) {
+                var document: PdfDocument? = null
+                try {
+                    ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                        PdfRenderer(descriptor).use { renderer ->
+                            document = PdfDocument()
+                            var outputPageNumber = 0
+                            for (pageIndex in 0 until renderer.pageCount) {
+                                if (cancellationSignal.isCanceled) {
+                                    callback.onWriteCancelled()
+                                    return
+                                }
+                                if (pages.none { pageIndex in it.start..it.end }) continue
+                                renderer.openPage(pageIndex).use { sourcePage ->
+                                    val targetWidth = pageSize.width.coerceAtLeast(1)
+                                    val targetHeight = pageSize.height.coerceAtLeast(1)
+                                    val scale = minOf(
+                                        targetWidth.toFloat() / sourcePage.width,
+                                        targetHeight.toFloat() / sourcePage.height
+                                    ).coerceAtMost(1.5f)
+                                    val bitmap = Bitmap.createBitmap(
+                                        (sourcePage.width * scale).toInt().coerceAtLeast(1),
+                                        (sourcePage.height * scale).toInt().coerceAtLeast(1),
+                                        Bitmap.Config.ARGB_8888
+                                    )
+                                    try {
+                                        sourcePage.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                                        val pageInfo = PdfDocument.PageInfo.Builder(targetWidth, targetHeight, outputPageNumber + 1).create()
+                                        val outputPage = document!!.startPage(pageInfo)
+                                        val destinationRect = RectF(0f, 0f, targetWidth.toFloat(), targetHeight.toFloat())
+                                        val sourceRect = RectF(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat())
+                                        val fitScale = minOf(destinationRect.width() / sourceRect.width(), destinationRect.height() / sourceRect.height())
+                                        val matrix = Matrix().apply {
+                                            setScale(fitScale, fitScale)
+                                            postTranslate(
+                                                (destinationRect.width() - sourceRect.width() * fitScale) / 2f,
+                                                (destinationRect.height() - sourceRect.height() * fitScale) / 2f
+                                            )
+                                        }
+                                        outputPage.canvas.drawColor(android.graphics.Color.WHITE)
+                                        outputPage.canvas.drawBitmap(bitmap, matrix, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG))
+                                        document!!.finishPage(outputPage)
+                                        outputPageNumber++
+                                    } finally {
+                                        bitmap.recycle()
+                                    }
+                                }
+                            }
+                            if (cancellationSignal.isCanceled) {
+                                callback.onWriteCancelled()
+                                return
+                            }
+                            if (outputPageNumber == 0) {
+                                callback.onWriteFailed("No selected PDF pages to print.")
+                                return
+                            }
+                            java.io.FileOutputStream(destination.fileDescriptor).use { output ->
+                                document!!.writeTo(output)
+                            }
+                            callback.onWriteFinished(arrayOf(PageRange(0, (outputPageNumber - 1).coerceAtLeast(0))))
+                        }
+                    }
+                } catch (e: Exception) {
+                    callback.onWriteFailed("PDF print failed: ${e.localizedMessage ?: "unknown error"}")
+                } finally {
+                    document?.close()
+                }
+            }
+        }
+        try {
+            printManager.print(
+                title,
+                adapter,
+                PrintAttributes.Builder()
+                    .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                    .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
+                    .build()
+            )
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(context, "Unable to start PDF printing: ${e.localizedMessage ?: "unknown error"}", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
 
     fun printWebView(
         context: Context,
@@ -35,12 +183,14 @@ object FilePrintHelper {
         content: String,
         title: String
     ) {
-        val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
+        val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
+        if (printManager == null) {
+            android.widget.Toast.makeText(context, "Printing service is unavailable.", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
         val tempWebView = WebView(context)
-        val escaped = content
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
+        val escaped = escapeHtml(content)
+        val escapedTitle = escapeHtml(title)
 
         val html = """
             <!DOCTYPE html>
@@ -77,7 +227,7 @@ object FilePrintHelper {
                 </style>
             </head>
             <body>
-                <h2>$title</h2>
+                <h2>$escapedTitle</h2>
                 <hr>
                 <pre>$escaped</pre>
             </body>
@@ -86,19 +236,70 @@ object FilePrintHelper {
 
         tempWebView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
-                val printAdapter = tempWebView.createPrintDocumentAdapter(title)
-                printManager.print(
-                    title,
-                    printAdapter,
-                    PrintAttributes.Builder()
-                        .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
-                        .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
-                        .build()
-                )
+                // Keep the WebView alive until Android's print adapter finishes; otherwise
+                // destroying it immediately can truncate the job on some print services.
+                try {
+                    val printAdapter = tempWebView.createPrintDocumentAdapter(title)
+                    val disposed = java.util.concurrent.atomic.AtomicBoolean(false)
+                    fun disposeWebView() {
+                        if (disposed.compareAndSet(false, true)) {
+                            tempWebView.stopLoading()
+                            tempWebView.destroy()
+                        }
+                    }
+                    val lifecycleAdapter = object : PrintDocumentAdapter() {
+                        override fun onStart() = printAdapter.onStart()
+
+                        override fun onLayout(
+                            oldAttributes: PrintAttributes?,
+                            newAttributes: PrintAttributes,
+                            cancellationSignal: CancellationSignal,
+                            callback: LayoutResultCallback,
+                            extras: Bundle?
+                        ) = printAdapter.onLayout(oldAttributes, newAttributes, cancellationSignal, callback, extras)
+
+                        override fun onWrite(
+                            pages: Array<out PageRange>,
+                            destination: ParcelFileDescriptor,
+                            cancellationSignal: CancellationSignal,
+                            callback: WriteResultCallback
+                        ) = printAdapter.onWrite(pages, destination, cancellationSignal, callback)
+
+                        override fun onFinish() {
+                            try {
+                                printAdapter.onFinish()
+                            } finally {
+                                disposeWebView()
+                            }
+                        }
+                    }
+                    printManager.print(
+                        title,
+                        lifecycleAdapter,
+                        PrintAttributes.Builder()
+                            .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                            .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
+                            .build()
+                    )
+                } catch (e: Exception) {
+                    tempWebView.destroy()
+                    android.widget.Toast.makeText(
+                        context,
+                        "Unable to start print job: ${e.localizedMessage ?: "unknown error"}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }
         tempWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
     }
+
+    private fun escapeHtml(value: String): String = value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;")
 
     fun printImage(
         context: Context,

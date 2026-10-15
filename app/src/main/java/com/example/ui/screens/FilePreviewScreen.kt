@@ -157,7 +157,8 @@ fun FilePreviewScreen(
     }
 
     var isWebRenderActive by remember(activeFile) {
-        mutableStateOf(true)
+        // Keep the established native reader UI as the default for plain text and Markdown.
+        mutableStateOf(activeFile?.extension?.lowercase() !in setOf("txt", "md"))
     }
 
     // HTML files are untrusted input: scripts stay off until the user opts in for this file.
@@ -189,6 +190,8 @@ fun FilePreviewScreen(
     var currentMatchIndex by remember { mutableStateOf(0) }
     var totalMatchesCount by remember { mutableStateOf(0) }
     var pdfSearchResults by remember { mutableStateOf<List<PdfSearchResult>>(emptyList()) }
+    var docxWebView by remember(activeFile?.path) { mutableStateOf<android.webkit.WebView?>(null) }
+    var docxSearchMatchCount by remember(activeFile?.path) { mutableStateOf(0) }
 
     // PDF search effect
     LaunchedEffect(inViewerSearchQuery, activeFile?.path, fileState) {
@@ -213,20 +216,64 @@ fun FilePreviewScreen(
     // Text search effect
     val textContent = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content ?: ""
     val textMatches = remember(textContent, inViewerSearchQuery) {
-        if (inViewerSearchQuery.length >= 2 && textContent.isNotEmpty()) {
-            val list = mutableListOf<Int>()
-            var idx = textContent.indexOf(inViewerSearchQuery, ignoreCase = true)
-            while (idx >= 0 && list.size < 500) {
-                list.add(idx)
-                idx = textContent.indexOf(inViewerSearchQuery, idx + inViewerSearchQuery.length.coerceAtLeast(1), ignoreCase = true)
-            }
-            list
+        if (inViewerSearchQuery.length >= 2) {
+            com.example.core.text.PreviewTextUtils.findMatchOffsets(textContent, inViewerSearchQuery)
         } else emptyList()
     }
-    LaunchedEffect(textMatches) {
+    LaunchedEffect(textMatches, textContent, fileState) {
         if (fileState is MainViewModel.FileContentState.TextSuccess) {
             totalMatchesCount = textMatches.size
             currentMatchIndex = 0
+            scrollToLineNumber = textMatches.firstOrNull()?.let { offset ->
+                textContent.substring(0, offset).count { it == '\n' } + 1
+            }
+        }
+    }
+
+    LaunchedEffect(currentMatchIndex, textMatches, textContent, fileState) {
+        if (fileState is MainViewModel.FileContentState.TextSuccess && textMatches.isNotEmpty()) {
+            val offset = textMatches.getOrNull(currentMatchIndex.coerceIn(0, textMatches.lastIndex))
+            if (offset != null) {
+                scrollToLineNumber = textContent.substring(0, offset).count { it == '\n' } + 1
+            }
+        }
+    }
+
+    // DOCX search indexes extracted paragraphs off the UI thread, then navigates the rendered WebView.
+    LaunchedEffect(inViewerSearchQuery, activeFile?.path, fileState) {
+        val file = activeFile
+        if (fileState is MainViewModel.FileContentState.DocxSuccess && file != null && inViewerSearchQuery.length >= 2) {
+            val count = withContext(Dispatchers.IO) {
+                runCatching {
+                    val extracted = com.example.core.format.DocxExtractor.extractText(java.io.File(file.path))
+                    com.example.core.text.PreviewTextUtils.findMatchOffsets(extracted.paragraphs.joinToString("\\n"), inViewerSearchQuery).size
+                }.getOrDefault(0)
+            }
+            docxSearchMatchCount = count
+            totalMatchesCount = count
+            currentMatchIndex = 0
+            docxWebView?.post {
+                val queryJson = org.json.JSONObject.quote(inViewerSearchQuery)
+                docxWebView?.evaluateJavascript(
+                    "if (window.getSelection) window.getSelection().removeAllRanges(); window.find($queryJson, false, false, true, false, false, false);",
+                    null
+                )
+            }
+        } else if (fileState is MainViewModel.FileContentState.DocxSuccess) {
+            docxSearchMatchCount = 0
+            totalMatchesCount = 0
+            currentMatchIndex = 0
+        }
+    }
+
+    LaunchedEffect(currentMatchIndex, inViewerSearchQuery, docxWebView, fileState, docxSearchMatchCount) {
+        if (fileState is MainViewModel.FileContentState.DocxSuccess && docxWebView != null && docxSearchMatchCount > 0 && inViewerSearchQuery.length >= 2) {
+            val queryJson = org.json.JSONObject.quote(inViewerSearchQuery)
+            val targetIndex = currentMatchIndex.coerceIn(0, docxSearchMatchCount - 1)
+            docxWebView?.evaluateJavascript(
+                "(function(){if(window.getSelection)window.getSelection().removeAllRanges(); for(var i=0;i<=${targetIndex};i++){if(!window.find($queryJson,false,false,true,false,false,false))break;}})();",
+                null
+            )
         }
     }
 
@@ -249,13 +296,42 @@ fun FilePreviewScreen(
         }
         (activityContext as? android.app.Activity)?.window
     }
+    val originalStatusBarColor = remember(previewWindow) { previewWindow?.statusBarColor }
+    val originalNavigationBarColor = remember(previewWindow) { previewWindow?.navigationBarColor }
+    val originalSystemUiVisibility = remember(previewView) { previewView.systemUiVisibility }
     DisposableEffect(previewWindow, previewView, isBarsVisible) {
-        val controller = previewWindow?.let { androidx.core.view.WindowInsetsControllerCompat(it, previewView) }
+        val window = previewWindow
+        val controller = window?.let { androidx.core.view.WindowInsetsControllerCompat(it, previewView) }
         controller?.systemBarsBehavior =
             androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         val systemBars = androidx.core.view.WindowInsetsCompat.Type.systemBars()
-        if (isBarsVisible) controller?.show(systemBars) else controller?.hide(systemBars)
-        onDispose { controller?.show(systemBars) }
+        if (!isBarsVisible && window != null) {
+            androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            previewView.systemUiVisibility =
+                android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            controller?.hide(systemBars)
+        } else {
+            if (window != null) {
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, true)
+                originalStatusBarColor?.let { window.statusBarColor = it }
+                originalNavigationBarColor?.let { window.navigationBarColor = it }
+            }
+            previewView.systemUiVisibility = originalSystemUiVisibility
+            controller?.show(systemBars)
+        }
+        onDispose {
+            controller?.show(systemBars)
+            if (window != null) {
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, true)
+                originalStatusBarColor?.let { window.statusBarColor = it }
+                originalNavigationBarColor?.let { window.navigationBarColor = it }
+            }
+            previewView.systemUiVisibility = originalSystemUiVisibility
+        }
     }
 
     LaunchedEffect(activeFile?.path) { isBarsVisible = true }
@@ -330,6 +406,7 @@ fun FilePreviewScreen(
                     navIcon = Icons.AutoMirrored.Filled.ArrowBack,
                     actions = {
                         val canSearchInDoc = fileState is MainViewModel.FileContentState.PdfSuccess ||
+                            fileState is MainViewModel.FileContentState.DocxSuccess ||
                             fileState is MainViewModel.FileContentState.TextSuccess ||
                             (activeFile?.extension?.lowercase() in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv"))
                         if (canSearchInDoc) {
@@ -347,7 +424,7 @@ fun FilePreviewScreen(
                             activeExtension in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
                         val canCustomizeAppearance = activeExtension in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql")
                         val canShowOutline = activeExtension in setOf("md", "pdf", "docx")
-                        val canUseImmersive = activeExtension in setOf("pdf", "png", "jpg", "jpeg", "webp", "gif", "txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
+                        val canUseImmersive = activeExtension in setOf("pdf", "docx", "txt", "md", "png", "jpg", "jpeg", "webp", "gif", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
                         if (isTextState) {
                             IconButton(onClick = {
                                 val textToCopy = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
@@ -492,13 +569,23 @@ fun FilePreviewScreen(
                                         showMenu = false
                                         activeFile?.let { entity ->
                                             val ext = entity.extension.lowercase()
-                                            if (ext in setOf("png", "jpg", "jpeg", "webp", "gif")) {
-                                                com.example.utils.FilePrintHelper.printImage(context, java.io.File(entity.path), entity.name)
-                                            } else {
-                                                val content = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
-                                                    ?: runCatching { java.io.File(entity.path).readText() }.getOrNull()
-                                                    ?: ""
-                                                com.example.utils.FilePrintHelper.printTextOrMarkdown(context, content, entity.name)
+                                            when (ext) {
+                                                "pdf" -> com.example.utils.FilePrintHelper.printPdf(context, java.io.File(entity.path), entity.name)
+                                                "docx" -> docxWebView?.let { webView ->
+                                                    com.example.utils.FilePrintHelper.printWebView(context, webView, entity.name)
+                                                } ?: android.widget.Toast.makeText(context, "Document is still rendering. Try again in a moment.", android.widget.Toast.LENGTH_SHORT).show()
+                                                "png", "jpg", "jpeg", "webp", "gif" ->
+                                                    com.example.utils.FilePrintHelper.printImage(context, java.io.File(entity.path), entity.name)
+                                                "txt", "md" -> {
+                                                    val content = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
+                                                        ?: runCatching { java.io.File(entity.path).readText() }.getOrNull()
+                                                    if (content != null) {
+                                                        com.example.utils.FilePrintHelper.printTextOrMarkdown(context, content, entity.name)
+                                                    } else {
+                                                        android.widget.Toast.makeText(context, "Could not read this document for printing.", android.widget.Toast.LENGTH_LONG).show()
+                                                    }
+                                                }
+                                                else -> android.widget.Toast.makeText(context, "Print is supported for PDF, DOCX, TXT and Markdown previews.", android.widget.Toast.LENGTH_SHORT).show()
                                             }
                                         }
                                     },
@@ -897,6 +984,8 @@ fun FilePreviewScreen(
                                         scrollToPage = pdfSearchResults[currentMatchIndex].pageNumber - 1
                                     } else if (textMatches.isNotEmpty()) {
                                         currentMatchIndex = (currentMatchIndex - 1 + textMatches.size) % textMatches.size
+                                    } else if (docxSearchMatchCount > 0) {
+                                        currentMatchIndex = (currentMatchIndex - 1 + docxSearchMatchCount) % docxSearchMatchCount
                                     }
                                 },
                                 enabled = totalMatchesCount > 0,
@@ -913,6 +1002,8 @@ fun FilePreviewScreen(
                                         scrollToPage = pdfSearchResults[currentMatchIndex].pageNumber - 1
                                     } else if (textMatches.isNotEmpty()) {
                                         currentMatchIndex = (currentMatchIndex + 1) % textMatches.size
+                                    } else if (docxSearchMatchCount > 0) {
+                                        currentMatchIndex = (currentMatchIndex + 1) % docxSearchMatchCount
                                     }
                                 },
                                 enabled = totalMatchesCount > 0,
@@ -1044,6 +1135,8 @@ fun FilePreviewScreen(
                                     fontSizeSetting = settings.fontSize,
                                     appearanceTheme = appearanceTheme,
                                     appearanceFontSize = appearanceFontSize,
+                                    searchQuery = inViewerSearchQuery,
+                                    selectedMatchIndex = currentMatchIndex,
                                     scrollToHeadingIndex = markdownOutlineJumpIndex,
                                     onOutlineJumpHandled = { markdownOutlineJumpIndex = null },
                                     modifier = Modifier.fillMaxSize()
@@ -1125,6 +1218,7 @@ fun FilePreviewScreen(
                             currentPdfPage = page
                             totalPdfPages = total
                         },
+                        onWebViewReady = { webView -> docxWebView = webView },
                         scrollToPage = scrollToPage,
                         onScrollProgressHandled = { scrollToPage = null },
                         scrollToHeadingIndex = docxOutlineJumpIndex,
@@ -1488,6 +1582,8 @@ fun MarkdownPreview(
     modifier: Modifier = Modifier,
     appearanceTheme: String = "Claude Glass",
     appearanceFontSize: Int? = null,
+    searchQuery: String = "",
+    selectedMatchIndex: Int = 0,
     scrollToHeadingIndex: Int? = null,
     onOutlineJumpHandled: () -> Unit = {}
 ) {
@@ -1824,6 +1920,20 @@ fun MarkdownPreview(
                         webView.tag = generatedHtml
                         webView.loadDataWithBaseURL(null, generatedHtml!!, "text/html", "UTF-8", null)
                     }
+                    val searchStateKey = "$searchQuery#$selectedMatchIndex"
+                    if (!isWebViewLoading && webView.contentDescription?.toString() != searchStateKey) {
+                        webView.contentDescription = searchStateKey
+                        if (searchQuery.length >= 2) {
+                            val queryJson = org.json.JSONObject.quote(searchQuery)
+                            val targetIndex = selectedMatchIndex.coerceAtLeast(0)
+                            webView.evaluateJavascript(
+                                "(function(){if(window.getSelection)window.getSelection().removeAllRanges(); for(var i=0;i<=${targetIndex};i++){if(!window.find($queryJson,false,false,true,false,false,false))break;}})();",
+                                null
+                            )
+                        } else {
+                            webView.evaluateJavascript("if(window.getSelection)window.getSelection().removeAllRanges();", null)
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -1870,6 +1980,10 @@ fun CodePreview(
     val context = androidx.compose.ui.platform.LocalContext.current
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     var isAllCopied by remember { mutableStateOf(false) }
+    var copiedFenceIndex by remember { mutableStateOf<Int?>(null) }
+    val fencedCodeBlocks = remember(codeText) {
+        com.example.core.text.PreviewTextUtils.extractFencedCodeBlocks(codeText)
+    }
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
 
     LaunchedEffect(isAllCopied) {
@@ -1940,6 +2054,34 @@ fun CodePreview(
             )
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+
+        if (fencedCodeBlocks.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                fencedCodeBlocks.forEachIndexed { index, block ->
+                    TextButton(
+                        onClick = {
+                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(block.code))
+                            copiedFenceIndex = index
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (copiedFenceIndex == index) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
+                            contentDescription = if (copiedFenceIndex == index) "Code block copied" else "Copy code block ${index + 1}",
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(if (copiedFenceIndex == index) "Copied block ${index + 1}" else "Copy block ${index + 1}", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
 
         Box(
             modifier = Modifier
@@ -2808,26 +2950,10 @@ fun PdfPreview(
  * while preserving natural skin tones and photographic colors so photos don't look like negative ghosts.
  */
 private fun applySmartPdfNightMode(pdfView: com.github.barteksc.pdfviewer.PDFView, isNight: Boolean) {
-    try {
-        pdfView.setNightMode(false)
-        val paintField = com.github.barteksc.pdfviewer.PDFView::class.java.getDeclaredField("paint")
-        paintField.isAccessible = true
-        val paint = paintField.get(pdfView) as? android.graphics.Paint
-        if (paint != null) {
-            paint.colorFilter = if (isNight) {
-                val matrix = floatArrayOf(
-                     0.25f, -0.70f, -0.315f, 0f, 225f,
-                    -0.35f,  0.05f, -0.465f, 0f, 225f,
-                    -0.45f, -0.45f,  0.135f, 0f, 225f,
-                     0.00f,  0.00f,  0.000f, 1f,   0f
-                )
-                android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix(matrix))
-            } else null
-            pdfView.invalidate()
-        }
-    } catch (e: Exception) {
-        pdfView.setNightMode(isNight)
-    }
+    // Use the PDF renderer's public API. Reflection on its private Paint is brittle and
+    // applies a color matrix to the entire page, damaging embedded photos and diagrams.
+    pdfView.setNightMode(isNight)
+    pdfView.invalidate()
 }
 
 @Composable
@@ -3641,6 +3767,7 @@ fun DocxPreviewWebView(
     viewModel: MainViewModel,
     modifier: Modifier = Modifier,
     onPageChanged: (Int, Int) -> Unit = { _, _ -> },
+    onWebViewReady: (android.webkit.WebView) -> Unit = {},
     scrollToPage: Int? = null,
     onScrollProgressHandled: () -> Unit = {},
     scrollToHeadingIndex: Int? = null,
@@ -3718,6 +3845,7 @@ fun DocxPreviewWebView(
                 factory = { ctx ->
                     android.webkit.WebView(ctx).apply {
                         webViewRef = this
+                    onWebViewReady(this)
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
@@ -3800,7 +3928,25 @@ fun DocxPreviewWebView(
                     }
                 },
                 update = { webView ->
-                    // No-op
+                    onWebViewReady(webView)
+                    // Keep appearance changes in sync without rebuilding the document.
+                    webView.evaluateJavascript(
+                        "(function(){document.body.classList.toggle('dark', $isNightMode); " +
+                            "var old=document.getElementById('fileclaw-theme-override'); if(old)old.remove(); " +
+                            "var style=document.createElement('style'); style.id='fileclaw-theme-override'; " +
+                            "style.textContent=" + org.json.JSONObject.quote(
+                                if (isNightMode) {
+                                    "body, body .docx { background:#1e1e1d !important; color:#f5f5f3 !important; } " +
+                                    "body .docx p, body .docx span, body .docx div, body .docx td, body .docx th, body .docx li, body .docx h1, body .docx h2, body .docx h3, body .docx h4 { color:#f5f5f3 !important; } " +
+                                    "body .docx table, body .docx td, body .docx th { border-color:#555 !important; } " +
+                                    "body .docx img { filter:none !important; }"
+                                } else {
+                                    "body, body .docx { background:#ffffff !important; color:#141413 !important; } " +
+                                    "body .docx table, body .docx td, body .docx th { border-color:#d0d0d0 !important; }"
+                                }
+                            ) + "; document.head.appendChild(style);})();",
+                        null
+                    )
                 },
                 modifier = Modifier.fillMaxSize()
             )

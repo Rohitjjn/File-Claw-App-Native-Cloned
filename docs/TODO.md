@@ -1,3 +1,31 @@
+## Loop 9 — Four-format preview reliability follow-up (in progress)
+
+- [x] Harden TXT/Markdown print-job lifecycle by keeping the temporary WebView alive through Android PrintDocumentAdapter completion and disposing it from the adapter finish callback.
+- [x] Escape both document content and title before inserting them into the print HTML; report unavailable print service and print-start errors.
+- [x] Add regression tests for repeated Unicode search matches/UTF-16 offsets, result limits, CRLF code fences, embedded backticks, and closing-fence length rules.
+- [x] Fixed the failing CRLF fenced-code test by normalizing carriage returns in copied code-block payloads to LF; regression test now expects stable LF output.
+- [x] Add the evidence-led Loop 10 prompt at `docs/loops/LOOP_10_NEXT_LOOP_PROMPT.md`.
+- [ ] Inspect latest GitHub Actions run for Loop 9 commit; unit tests, coverage, lint, Detekt and debug APK must pass.
+- [ ] Real-device print lifecycle, Unicode search and fenced-code copy smoke tests remain pending.
+
+Status: source edits are committed, but do not mark Loop 9 verified until the newest SHA's CI completes. No real-device test has been performed by this implementation pass.
+
+## Loop 8 — Four-format document preview polish (in progress)
+
+- [x] Added shared case-insensitive text-match offsets and fenced-code extraction utility, with unit tests for case-insensitive occurrences, indentation-preserving copy payloads, tilde fences, multiple blocks and unclosed fences.
+- [x] Restored the default native reader selection for TXT/MD (rendered view remains available via the existing toggle).
+- [x] Improved focus-mode edge-to-edge handling and restoration of system-bar/window state on exit/disposal.
+- [x] Replaced PDF private-field color-filter reflection with the renderer's public night-mode API; image-heavy/scanned PDFs may remain renderer-limited.
+- [x] Exposed DOCX in the search and immersive-focus entry points.
+- [~] TXT/code-reader search now moves the viewport when Previous/Next changes the selected match; PDF page navigation exists, but raw-stream search is approximate and visual highlight behavior still needs device verification.
+- [~] Added per-fenced-block copy controls in the native TXT/code reader and retained Markdown WebView code-block copy controls; verify clipboard behavior on-device.
+- [~] Print routing now distinguishes PDF, DOCX, TXT/MD and images. PDF pages are rasterized one at a time into Android PrintManager output; DOCX prints the rendered WebView. Temporary WebView cleanup and print-service failure handling still need review.
+- [~] DOCX dark theme now styles document text/tables while leaving images untouched; fit-page behavior and actual pinch/zoom range still require device verification.
+- [~] DOCX search now counts extracted paragraph matches and uses WebView find navigation. Exact mapping between extracted paragraph offsets and rendered text must be verified against complex DOCX files.
+- [ ] Run Android unit tests, coverage, lint, Detekt and debug APK CI; perform real-device smoke checks for all four formats and navigation modes.
+
+Status note: `[~]` means implemented but not yet fully verified. GitHub Actions is running on the latest branch head; inspect the exact head SHA and final run conclusion before treating the code as build-verified. Real-device smoke tests remain required. Keep PR in draft and do not merge until the user tests the APK.
+
 # Backlog and known issues
 
 Priorities: **P0** data loss / crash / security · **P1** high-impact feature or correctness · **P2** quality · **P3** polish.

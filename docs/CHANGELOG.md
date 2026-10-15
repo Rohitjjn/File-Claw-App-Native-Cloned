@@ -1,3 +1,22 @@
+## Loop 9 — Four-format preview reliability follow-up (in progress)
+
+- Wrapped the TXT/Markdown print adapter so its temporary WebView is disposed after Android calls the adapter's finish lifecycle callback, rather than being abandoned after the print sheet opens.
+- Escaped the print document title as well as its content before interpolation into HTML; added user-visible errors for unavailable print service and print-start exceptions.
+- Expanded `PreviewTextUtilsTest` coverage for repeated Unicode matches and UTF-16 offsets, result caps, CRLF fences, embedded backticks, and fence-length rules.
+- Added `docs/loops/LOOP_10_NEXT_LOOP_PROMPT.md`, which prioritizes real-device evidence and verified defects in PDF, DOCX, TXT and Markdown.
+- CI and real-device verification are pending for this Loop 9 commit; these changes are not yet claimed as device-tested.
+
+## Loop 8 — Document preview polish (in progress)
+
+- Added document-specific PrintManager routing: PDFs are printed page-by-page through Android's PDF renderer, DOCX uses its rendered WebView, and TXT/Markdown remain readable text print jobs.
+- Added fenced-code copy controls for native TXT/code previews and selected-match line navigation for text search.
+- Added DOCX paragraph search counting/navigation and a theme override for document text and tables that deliberately does not invert images.
+- Verification is still in progress; these changes are not marked device-tested until CI and manual smoke checks are complete.
+
+- Added `docs/loops/LOOP_08_DOCUMENT_PREVIEW_POLISH.md` as the focused execution contract for PDF, DOCX, TXT and Markdown only.
+- Added `docs/loops/LOOP_09_NEXT_LOOP_PROMPT.md` to guide the next evidence-led review after Loop 8 verification.
+- Exposed DOCX in the in-viewer search entry point and immersive-focus action set. Search result extraction/navigation and actual device behavior still require implementation and verification; these UI entry-point changes alone do not resolve the full reported issues.
+
 # Changelog
 
 Format: [Keep a Changelog](https://keepachangelog.com). Numbers marked **(measured)** were produced by a real
