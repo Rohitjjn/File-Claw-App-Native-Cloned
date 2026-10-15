@@ -115,6 +115,17 @@ import androidx.compose.ui.text.input.TextFieldValue
 import com.example.ui.component.DocumentOutlineParser
 import com.example.ui.component.ViewerSyntaxTheme
 import com.example.ui.component.ViewerAppearancePrefs
+import com.example.core.format.DocxZoomPolicy
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import android.media.MediaPlayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -158,6 +169,71 @@ private fun showTextOperationError(context: android.content.Context, error: Thro
         error.message ?: "Could not prepare the complete file",
         android.widget.Toast.LENGTH_LONG
     ).show()
+}
+
+/** Themed match counter + prev/next controls for the in-document search overlay (v1.3.0). */
+@Composable
+private fun SearchMatchBadgeRow(
+    isPdfSearch: Boolean,
+    isLargeTextSearchable: Boolean,
+    isPdfSearchLoading: Boolean,
+    isFullTextLoading: Boolean,
+    pdfSearchError: String?,
+    largeTextSearchError: String?,
+    totalMatchesCount: Int,
+    searchResultsTruncated: Boolean,
+    currentMatchIndex: Int,
+    pdfPageInfo: String,
+    navigableMatchCount: Int,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit
+) {
+    val hasError = (pdfSearchError != null && isPdfSearch) ||
+        (largeTextSearchError != null && isLargeTextSearchable)
+    val matchLabel = when {
+        isPdfSearchLoading -> "Searching…"
+        isFullTextLoading -> "Searching full file…"
+        hasError -> "Search unavailable"
+        totalMatchesCount > 0 && searchResultsTruncated -> "${currentMatchIndex + 1}/$navigableMatchCount of $totalMatchesCount$pdfPageInfo"
+        totalMatchesCount > 0 -> "${currentMatchIndex + 1}/$totalMatchesCount$pdfPageInfo"
+        else -> "0 matches"
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = when {
+                hasError -> MaterialTheme.colorScheme.error.copy(alpha = 0.14f)
+                totalMatchesCount > 0 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+            }
+        ) {
+            Text(
+                text = matchLabel,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = when {
+                    hasError -> MaterialTheme.colorScheme.error
+                    totalMatchesCount > 0 -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                },
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+            )
+        }
+        IconButton(
+            onClick = onPrevious,
+            enabled = totalMatchesCount > 0 && !isPdfSearchLoading,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous match", modifier = Modifier.size(20.dp))
+        }
+        IconButton(
+            onClick = onNext,
+            enabled = totalMatchesCount > 0 && !isPdfSearchLoading,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next match", modifier = Modifier.size(20.dp))
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -204,8 +280,13 @@ fun FilePreviewScreen(
     var showDocxZoomDialog by remember { mutableStateOf(false) }
     var showOutlineBottomSheet by remember { mutableStateOf(false) }
     var showAppearanceBottomSheet by remember { mutableStateOf(false) }
-    var docxZoomFactor by remember(activeFile?.path) { mutableFloatStateOf(1.0f) }
-    var docxZoomInput by remember(activeFile?.path) { mutableStateOf("100") }
+    val docxZoomSeedContext = LocalContext.current
+    var docxZoomFactor by remember(activeFile?.path) {
+        mutableFloatStateOf(
+            DocxZoomPolicy.fromPercent(ViewerAppearancePrefs.getDocxZoomPercent(docxZoomSeedContext))
+        )
+    }
+    var docxZoomInput by remember(activeFile?.path) { mutableStateOf(DocxZoomPolicy.defaultPercent().toString()) }
     var searchTriggerNext by remember { mutableIntStateOf(0) }
     var searchTriggerPrev by remember { mutableIntStateOf(0) }
 
@@ -283,6 +364,13 @@ fun FilePreviewScreen(
         viewerSyntaxTheme = ViewerAppearancePrefs.getTheme(context)
         viewerFontSizeSp = ViewerAppearancePrefs.getFontSize(context)
         viewerZoomPercent = ViewerAppearancePrefs.getZoomPercent(context)
+    }
+
+    // Persist the DOCX zoom preference (debounced so pinch gestures never spam disk).
+    val docxZoomPersistContext = LocalContext.current
+    LaunchedEffect(docxZoomFactor) {
+        kotlinx.coroutines.delay(400)
+        ViewerAppearancePrefs.setDocxZoomPercent(docxZoomPersistContext, DocxZoomPolicy.toPercent(docxZoomFactor))
     }
 
     // Auto-focus the in-document search field (and raise the keyboard) when the overlay opens.
@@ -506,9 +594,15 @@ fun FilePreviewScreen(
         topBar = {
             androidx.compose.animation.AnimatedVisibility(
                 visible = isBarsVisible,
-                enter = androidx.compose.animation.slideInVertically(initialOffsetY = { -it }) + androidx.compose.animation.fadeIn(),
-                exit = androidx.compose.animation.slideOutVertically(targetOffsetY = { -it }) + androidx.compose.animation.fadeOut(),
-                modifier = if (isBarsVisible) Modifier.statusBarsPadding() else Modifier
+                enter = androidx.compose.animation.slideInVertically(
+                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                    initialOffsetY = { -it }
+                ) + androidx.compose.animation.fadeIn(tween(220)),
+                exit = androidx.compose.animation.slideOutVertically(
+                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                    targetOffsetY = { -it }
+                ) + androidx.compose.animation.fadeOut(tween(220)),
+                modifier = Modifier.statusBarsPadding()
             ) {
                 val titleText = fileState.fileOrNull?.name ?: "Preview"
                 
@@ -783,7 +877,9 @@ fun FilePreviewScreen(
         },
         bottomBar = {
             val isPdf = fileState is MainViewModel.FileContentState.PdfSuccess
-            val isDocx = fileState is MainViewModel.FileContentState.DocxSuccess || (activeFile?.extension?.lowercase() in setOf("docx", "doc"))
+            // Gate on the real state: legacy .doc files open in the hex viewer and must not
+            // show DOCX zoom controls.
+            val isDocx = fileState is MainViewModel.FileContentState.DocxSuccess
             val isImage = fileState is MainViewModel.FileContentState.ImageSuccess
             val isText = fileState is MainViewModel.FileContentState.TextSuccess ||
                 (activeFile?.extension?.lowercase() in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv"))
@@ -793,8 +889,14 @@ fun FilePreviewScreen(
             if (showFloatingBar) {
                 androidx.compose.animation.AnimatedVisibility(
                     visible = isBarsVisible,
-                    enter = androidx.compose.animation.slideInVertically(initialOffsetY = { it }) + androidx.compose.animation.fadeIn(),
-                    exit = androidx.compose.animation.slideOutVertically(targetOffsetY = { it }) + androidx.compose.animation.fadeOut()
+                    enter = androidx.compose.animation.slideInVertically(
+                        animationSpec = tween(260, easing = FastOutSlowInEasing),
+                        initialOffsetY = { it }
+                    ) + androidx.compose.animation.fadeIn(tween(220)),
+                    exit = androidx.compose.animation.slideOutVertically(
+                        animationSpec = tween(260, easing = FastOutSlowInEasing),
+                        targetOffsetY = { it }
+                    ) + androidx.compose.animation.fadeOut(tween(220))
                 ) {
                     Box(
                         modifier = Modifier
@@ -1374,15 +1476,17 @@ fun FilePreviewScreen(
                     } else Modifier
                 )
                 .background(MaterialTheme.colorScheme.background)
-                .let {
-                    if (isBarsVisible) it.padding(innerPadding) else it
-                }
+                // Always respect the animated scaffold insets: the padding shrinks frame-by-frame
+                // while the bars slide away, so focus mode no longer snaps the content full-bleed.
+                .padding(innerPadding)
         ) {
             // Subtle Floating Back & Exit Pill when !isBarsVisible (Focus mode)
             androidx.compose.animation.AnimatedVisibility(
                 visible = !isBarsVisible,
-                enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { -it },
-                exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { -it },
+                enter = androidx.compose.animation.fadeIn(tween(220)) +
+                    androidx.compose.animation.slideInVertically(tween(260, easing = FastOutSlowInEasing)) { -it },
+                exit = androidx.compose.animation.fadeOut(tween(220)) +
+                    androidx.compose.animation.slideOutVertically(tween(260, easing = FastOutSlowInEasing)) { -it },
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .statusBarsPadding()
@@ -1428,14 +1532,51 @@ fun FilePreviewScreen(
             // Floating In-Viewer Search Bar Overlay
             androidx.compose.animation.AnimatedVisibility(
                 visible = isSearchInDocumentOpen && isBarsVisible,
-                enter = androidx.compose.animation.slideInVertically { -it } + androidx.compose.animation.fadeIn(),
-                exit = androidx.compose.animation.slideOutVertically { -it } + androidx.compose.animation.fadeOut(),
+                enter = androidx.compose.animation.slideInVertically(
+                    animationSpec = tween(260, easing = FastOutSlowInEasing)
+                ) { -it } + androidx.compose.animation.fadeIn(tween(220)),
+                exit = androidx.compose.animation.slideOutVertically(
+                    animationSpec = tween(260, easing = FastOutSlowInEasing)
+                ) { -it } + androidx.compose.animation.fadeOut(tween(220)),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .then(if (isBarsVisible) Modifier.statusBarsPadding() else Modifier)
+                    .statusBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
                     .fillMaxWidth()
             ) {
+                // Match navigation shared by the arrow buttons and the keyboard Search action.
+                val goToNextMatch = {
+                    if (fileState is MainViewModel.FileContentState.PdfSuccess) {
+                        val matches = pdfSearchSnapshot.matches
+                        if (matches.isNotEmpty()) {
+                            currentMatchIndex = (currentMatchIndex + 1) % matches.size
+                            scrollToPage = matches[currentMatchIndex].pageNumber - 1
+                        }
+                    } else if (isLargeTextSearchable) {
+                        if (largeTextSearchMatches.isNotEmpty()) {
+                            currentMatchIndex = (currentMatchIndex + 1) % largeTextSearchMatches.size
+                        }
+                    } else {
+                        searchTriggerNext++
+                    }
+                    Unit
+                }
+                val goToPrevMatch = {
+                    if (fileState is MainViewModel.FileContentState.PdfSuccess) {
+                        val matches = pdfSearchSnapshot.matches
+                        if (matches.isNotEmpty()) {
+                            currentMatchIndex = (currentMatchIndex - 1 + matches.size) % matches.size
+                            scrollToPage = matches[currentMatchIndex].pageNumber - 1
+                        }
+                    } else if (isLargeTextSearchable) {
+                        if (largeTextSearchMatches.isNotEmpty()) {
+                            currentMatchIndex = (currentMatchIndex - 1 + largeTextSearchMatches.size) % largeTextSearchMatches.size
+                        }
+                    } else {
+                        searchTriggerPrev++
+                    }
+                    Unit
+                }
                 Surface(
                     shape = RoundedCornerShape(24.dp),
                     color = MaterialTheme.colorScheme.surface,
@@ -1482,83 +1623,42 @@ fun FilePreviewScreen(
                                 },
                                 singleLine = true,
                                 textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = { goToNextMatch() }),
                                 cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
                                 modifier = Modifier.fillMaxWidth().focusRequester(searchFieldFocusRequester)
                             )
                         }
 
-                        if (inViewerSearchQuery.isNotEmpty()) {
-                            val isPdfSearch = fileState is MainViewModel.FileContentState.PdfSuccess
-                            val extension = activeFile?.extension?.lowercase()
-                            val navigableMatchCount = when {
-                                isPdfSearch -> pdfSearchSnapshot.matches.size
-                                isLargeTextSearchable -> largeTextSearchMatches.size
-                                extension in setOf("docx", "doc") -> minOf(totalMatchesCount, 5_000)
-                                extension in setOf("txt", "md") -> minOf(totalMatchesCount, 1_000)
-                                else -> totalMatchesCount
-                            }
-                            val pageInfo = if (isPdfSearch) {
-                                pdfSearchSnapshot.matches.getOrNull(currentMatchIndex)?.pageNumber?.let { " (p.$it)" }.orEmpty()
-                            } else ""
-                            val matchLabel = when {
-                                isPdfSearchLoading -> "Searching…"
-                                isFullTextLoading -> "Searching full file…"
-                                (pdfSearchError != null && isPdfSearch) || (largeTextSearchError != null && isLargeTextSearchable) -> "Search unavailable"
-                                totalMatchesCount > 0 && searchResultsTruncated -> "${currentMatchIndex + 1}/$navigableMatchCount of $totalMatchesCount$pageInfo"
-                                totalMatchesCount > 0 -> "${currentMatchIndex + 1}/$totalMatchesCount$pageInfo"
-                                else -> "0 matches"
-                            }
-
-                            Text(
-                                text = matchLabel,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                modifier = Modifier.padding(horizontal = 4.dp)
+                        AnimatedVisibility(
+                            visible = inViewerSearchQuery.isNotEmpty(),
+                            enter = fadeIn(tween(160)) + scaleIn(initialScale = 0.85f, animationSpec = tween(160, easing = FastOutSlowInEasing)),
+                            exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.85f, animationSpec = tween(140))
+                        ) {
+                            SearchMatchBadgeRow(
+                                isPdfSearch = fileState is MainViewModel.FileContentState.PdfSuccess,
+                                isLargeTextSearchable = isLargeTextSearchable,
+                                isPdfSearchLoading = isPdfSearchLoading,
+                                isFullTextLoading = isFullTextLoading,
+                                pdfSearchError = pdfSearchError,
+                                largeTextSearchError = largeTextSearchError,
+                                totalMatchesCount = totalMatchesCount,
+                                searchResultsTruncated = searchResultsTruncated,
+                                currentMatchIndex = currentMatchIndex,
+                                pdfPageInfo = pdfSearchSnapshot.matches.getOrNull(currentMatchIndex)?.pageNumber?.let { " (p.$it)" }.orEmpty(),
+                                navigableMatchCount = run {
+                                    val extension = activeFile?.extension?.lowercase()
+                                    when {
+                                        fileState is MainViewModel.FileContentState.PdfSuccess -> pdfSearchSnapshot.matches.size
+                                        isLargeTextSearchable -> largeTextSearchMatches.size
+                                        extension in setOf("docx", "doc") -> minOf(totalMatchesCount, 5_000)
+                                        extension in setOf("txt", "md") -> minOf(totalMatchesCount, 1_000)
+                                        else -> totalMatchesCount
+                                    }
+                                },
+                                onPrevious = { goToPrevMatch() },
+                                onNext = { goToNextMatch() }
                             )
-
-                            IconButton(
-                                onClick = {
-                                    if (isPdfSearch) {
-                                        val matches = pdfSearchSnapshot.matches
-                                        if (matches.isNotEmpty()) {
-                                            currentMatchIndex = (currentMatchIndex - 1 + matches.size) % matches.size
-                                            scrollToPage = matches[currentMatchIndex].pageNumber - 1
-                                        }
-                                    } else if (isLargeTextSearchable) {
-                                        if (largeTextSearchMatches.isNotEmpty()) {
-                                            currentMatchIndex = (currentMatchIndex - 1 + largeTextSearchMatches.size) % largeTextSearchMatches.size
-                                        }
-                                    } else {
-                                        searchTriggerPrev++
-                                    }
-                                },
-                                enabled = totalMatchesCount > 0 && !isPdfSearchLoading,
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous match", modifier = Modifier.size(18.dp))
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    if (isPdfSearch) {
-                                        val matches = pdfSearchSnapshot.matches
-                                        if (matches.isNotEmpty()) {
-                                            currentMatchIndex = (currentMatchIndex + 1) % matches.size
-                                            scrollToPage = matches[currentMatchIndex].pageNumber - 1
-                                        }
-                                    } else if (isLargeTextSearchable) {
-                                        if (largeTextSearchMatches.isNotEmpty()) {
-                                            currentMatchIndex = (currentMatchIndex + 1) % largeTextSearchMatches.size
-                                        }
-                                    } else {
-                                        searchTriggerNext++
-                                    }
-                                },
-                                enabled = totalMatchesCount > 0 && !isPdfSearchLoading,
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next match", modifier = Modifier.size(18.dp))
-                            }
                         }
 
                         IconButton(
@@ -1571,9 +1671,9 @@ fun FilePreviewScreen(
                                 totalMatchesCount = 0
                                 currentMatchIndex = 0
                             },
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(32.dp)
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = "Close search", modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Close, contentDescription = "Close search", modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -1835,7 +1935,13 @@ fun FilePreviewScreen(
                         zoomFactor = docxZoomFactor,
                         onWebViewCreated = { docxPreviewWebView = it },
                         onDocumentReady = { docxPreviewReady = true },
-                        onSingleTap = { isBarsVisible = !isBarsVisible }
+                        onSingleTap = { isBarsVisible = !isBarsVisible },
+                        onPinchZoom = { delta ->
+                            docxZoomFactor = com.example.core.format.DocxZoomPolicy.applyPinch(docxZoomFactor, delta)
+                        },
+                        onDoubleTap = {
+                            docxZoomFactor = com.example.core.format.DocxZoomPolicy.toggleDoubleTap(docxZoomFactor)
+                        }
                     )
                 }
                 is MainViewModel.FileContentState.PptxSuccess -> {
@@ -2011,11 +2117,12 @@ fun FilePreviewScreen(
                     Slider(
                         value = docxZoomFactor,
                         onValueChange = {
-                            docxZoomFactor = it
+                            docxZoomFactor = com.example.core.format.DocxZoomPolicy.coerce(it)
                             docxZoomInput = (it * 100).toInt().toString()
                         },
+                        // 0.05 stops so the 40% default is a reachable snap point.
                         valueRange = 0.25f..5.0f,
-                        steps = 18
+                        steps = 94
                     )
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("25%", style = MaterialTheme.typography.labelSmall)
@@ -2479,9 +2586,9 @@ fun MarkdownPreview(
                         max-width: 100%;
                         border-radius: 8px;
                     }
-                    .search-highlight { background: #ffe082; color: #17130a; border-radius: 2px; }
-                    .search-highlight-active { background: #ff9800; color: #17130a; outline: 2px solid #e65100; }
-                    .line-anchor-flash { background: #ffe082; color: #17130a; border-radius: 2px; outline: 2px solid #ff9800; transition: background 0.4s ease; }
+                    .search-highlight { background: rgba(204, 120, 92, 0.32); color: inherit; border-radius: 2px; }
+                    .search-highlight-active { background: #cc785c; color: #ffffff; outline: 2px solid rgba(232, 165, 90, 0.9); }
+                    .line-anchor-flash { background: rgba(204, 120, 92, 0.32); color: inherit; border-radius: 2px; outline: 2px solid #cc785c; transition: background 0.4s ease; }
                     @media print { .code-header, .copy-btn { display: none !important; } .code-block-container { break-inside: avoid; } }
                 </style>
                 $DocumentPreviewScript
@@ -2589,6 +2696,7 @@ private fun SearchableDocumentWebView(
     var isLoading by remember { mutableStateOf(true) }
     var lastIssuedNext by remember { mutableIntStateOf(0) }
     var lastIssuedPrev by remember { mutableIntStateOf(0) }
+    var lastIssuedQuery by remember { mutableStateOf<String?>(null) }
 
     androidx.compose.ui.viewinterop.AndroidView(
         factory = { viewContext ->
@@ -2650,6 +2758,12 @@ private fun SearchableDocumentWebView(
         if (webView != null && isPageReady) {
             val nextDelta = (searchTriggerNext - lastIssuedNext).coerceAtLeast(0)
             val prevDelta = (searchTriggerPrev - lastIssuedPrev).coerceAtLeast(0)
+            if (searchQuery != lastIssuedQuery) {
+                // Debounce: typing re-highlights the whole DOM once the user pauses,
+                // instead of once per keystroke (big documents used to stutter).
+                kotlinx.coroutines.delay(150)
+                if (!kotlin.coroutines.coroutineContext.isActive) return@LaunchedEffect
+            }
             val encodedQuery = org.json.JSONObject.quote(searchQuery)
             val script = buildString {
                 append("searchWord($encodedQuery);")
@@ -2659,6 +2773,7 @@ private fun SearchableDocumentWebView(
             webView.evaluateJavascript(script, null)
             lastIssuedNext = searchTriggerNext
             lastIssuedPrev = searchTriggerPrev
+            lastIssuedQuery = searchQuery
         } else if (searchTriggerNext < lastIssuedNext) {
             lastIssuedNext = searchTriggerNext
             lastIssuedPrev = searchTriggerPrev
@@ -3536,6 +3651,15 @@ fun PdfPreview(
     var pdfPassword by remember(fileEntity.path) { mutableStateOf("") }
     var pdfErrorMessage by remember(fileEntity.path) { mutableStateOf<String?>(null) }
 
+    // Settles pinch-zoom gestures: after the user lifts their fingers the visible pages
+    // re-rasterize at the new resolution (Google Drive reader behavior).
+    val zoomSettleHandler = remember(fileEntity.path) {
+        android.os.Handler(android.os.Looper.getMainLooper())
+    }
+    DisposableEffect(fileEntity.path) {
+        onDispose { zoomSettleHandler.removeCallbacksAndMessages(null) }
+    }
+
     val latestSearchSnapshot = androidx.compose.runtime.rememberUpdatedState(onSearchSnapshot)
     val latestSearchError = androidx.compose.runtime.rememberUpdatedState(onSearchError)
     val latestPageChanged = androidx.compose.runtime.rememberUpdatedState(onPageChanged)
@@ -3634,6 +3758,25 @@ fun PdfPreview(
                                     view: android.webkit.WebView,
                                     url: String
                                 ): Boolean = !isBundledPdfReaderUri(android.net.Uri.parse(url))
+
+                                override fun onScaleChanged(
+                                    view: android.webkit.WebView,
+                                    oldScale: Float,
+                                    newScale: Float
+                                ) {
+                                    // During the pinch the WebView only magnifies the rasterized
+                                    // bitmap; once the gesture settles we re-render the visible
+                                    // pages at the new resolution for a crisp zoom (v1.3.0).
+                                    super.onScaleChanged(view, oldScale, newScale)
+                                    if (kotlin.math.abs(newScale - oldScale) < 0.01f) return
+                                    zoomSettleHandler.removeCallbacksAndMessages(null)
+                                    zoomSettleHandler.postDelayed({
+                                        view.evaluateJavascript(
+                                            "if (window.setPdfRenderScale) setPdfRenderScale($newScale);",
+                                            null
+                                        )
+                                    }, 260)
+                                }
 
                                 override fun shouldInterceptRequest(
                                     view: android.webkit.WebView,
@@ -4221,7 +4364,9 @@ fun DocxPreviewWebView(
     zoomFactor: Float = 1.0f,
     onWebViewCreated: (android.webkit.WebView?) -> Unit = {},
     onDocumentReady: () -> Unit = {},
-    onSingleTap: () -> Unit = {}
+    onSingleTap: () -> Unit = {},
+    onPinchZoom: (Float) -> Unit = {},
+    onDoubleTap: () -> Unit = {}
 ) {
     var isWebViewLoading by remember(base64Docx) { mutableStateOf(true) }
     var webViewRef by remember(base64Docx) { mutableStateOf<android.webkit.WebView?>(null) }
@@ -4234,6 +4379,8 @@ fun DocxPreviewWebView(
     val latestDocumentReadyCallback = androidx.compose.runtime.rememberUpdatedState(onDocumentReady)
     val latestWebViewCreatedCallback = androidx.compose.runtime.rememberUpdatedState(onWebViewCreated)
     val latestSingleTapCallback = androidx.compose.runtime.rememberUpdatedState(onSingleTap)
+    val latestPinchZoomCallback = androidx.compose.runtime.rememberUpdatedState(onPinchZoom)
+    val latestDoubleTapCallback = androidx.compose.runtime.rememberUpdatedState(onDoubleTap)
 
     LaunchedEffect(webViewRef, isWebViewLoading, searchQuery, searchTriggerNext, searchTriggerPrev, pureKotlinFallback) {
         val webView = webViewRef
@@ -4363,6 +4510,11 @@ fun DocxPreviewWebView(
                                 }
 
                                 @android.webkit.JavascriptInterface
+                                fun onDocumentDoubleTap() {
+                                    mainHandler.post { latestDoubleTapCallback.value() }
+                                }
+
+                                @android.webkit.JavascriptInterface
                                 fun onDocumentError(error: String) {
                                     mainHandler.post {
                                         isWebViewLoading = false
@@ -4384,7 +4536,12 @@ fun DocxPreviewWebView(
 
                             webViewClient = object : android.webkit.WebViewClient() {
                                 override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
-                                    view?.evaluateJavascript("loadDocx(window.Android.getDocxBase64(), $isNightMode);", null)
+                                    // Apply the zoom factor BEFORE loadDocx so the document never
+                                    // flashes at 100% before settling on the preferred zoom.
+                                    view?.evaluateJavascript(
+                                        "setZoom($zoomFactor); loadDocx(window.Android.getDocxBase64(), $isNightMode);",
+                                        null
+                                    )
                                 }
 
                                 override fun shouldOverrideUrlLoading(
@@ -4435,7 +4592,29 @@ fun DocxPreviewWebView(
                         latestWebViewCreatedCallback.value(webView)
                         webView.setBackgroundColor(if (isNightMode) 0xFF151514.toInt() else 0xFFfaf9f5.toInt())
                     },
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        // Pinch-to-zoom interception: two-finger gestures drive the shared
+                        // docxZoomFactor -> setZoom() pipeline; single-finger scroll passes
+                        // through to the WebView untouched.
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                    do {
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        val pressed = event.changes.filter { it.pressed }
+                                        if (pressed.size >= 2) {
+                                            val zoomChange = event.calculateZoom()
+                                            if (zoomChange != 1f) latestPinchZoomCallback.value(zoomChange)
+                                            event.changes.forEach { change ->
+                                                if (change.pressed) change.consume()
+                                            }
+                                        }
+                                    } while (event.changes.any { it.pressed })
+                                }
+                            }
+                        }
                 )
             }
 

@@ -48,18 +48,6 @@
       overflow: hidden;
       pointer-events: none;
     }
-    .pdf-search-highlight {
-      position: absolute;
-      min-width: 2px;
-      background: rgba(255, 213, 79, .64);
-      border-radius: 2px;
-      box-shadow: inset 0 0 0 1px rgba(122, 75, 0, .22);
-    }
-    .pdf-search-highlight.active {
-      background: rgba(255, 145, 0, .76);
-      outline: 2px solid rgba(230, 81, 0, .92);
-      z-index: 2;
-    }
     body.dark {
       color-scheme: dark;
       --reader-background: #191a1b;
@@ -67,16 +55,37 @@
       --page-shadow: 0 4px 20px rgba(0, 0, 0, .55);
       --page-border: rgba(255, 255, 255, .08);
     }
+    /* v1.3.0: text pages get a full luminance inversion (deep, readable dark);
+       photo-heavy pages are detected in JS and keep their natural colors, only
+       slightly dimmed — the "ghost people" bug is gone. */
     body.dark .pdf-page canvas {
-      filter: invert(.88) hue-rotate(180deg) contrast(.96);
+      filter: invert(1) hue-rotate(180deg) brightness(.94) contrast(.92);
+    }
+    body.dark .pdf-page.photo canvas {
+      filter: brightness(.9) contrast(1.04);
+    }
+    body.dark .pdf-page.photo {
+      background: #2a2b2c;
+    }
+    .pdf-search-highlight {
+      position: absolute;
+      min-width: 2px;
+      background: rgba(204, 120, 92, .48);
+      border-radius: 2px;
+      box-shadow: inset 0 0 0 1px rgba(122, 61, 40, .25);
+    }
+    .pdf-search-highlight.active {
+      background: rgba(232, 165, 90, .82);
+      outline: 2px solid rgba(204, 120, 92, .95);
+      z-index: 2;
     }
     body.dark .pdf-search-highlight {
-      background: rgba(255, 213, 79, .58);
-      box-shadow: inset 0 0 0 1px rgba(255, 236, 179, .3);
+      background: rgba(204, 120, 92, .55);
+      box-shadow: inset 0 0 0 1px rgba(255, 213, 179, .3);
     }
     body.dark .pdf-search-highlight.active {
-      background: rgba(255, 145, 0, .8);
-      outline-color: rgba(255, 183, 77, .96);
+      background: rgba(232, 165, 90, .85);
+      outline-color: rgba(255, 196, 128, .96);
     }
   </style>
 </head>
@@ -96,7 +105,12 @@
     const pdfUrl = '/search-pdf/document.pdf';
     const maxStoredMatches = 2000;
     const maxRectsPerMatch = 24;
-    const maxCanvasPixelRatio = 2;
+    // v1.3.0: hi-DPI aware rasterization budget. Each rendered page backs at most
+    // ~9M device pixels (~36MB ARGB), but the ratio now SCALES WITH THE PINCH ZOOM
+    // so zoomed pages stay crisp instead of magnifying a fixed-resolution bitmap.
+    const pagePixelBudget = 9.0e6;
+    const maxRenderRatio = 6;
+    let renderScaleHint = 1;
     pdfjsLib.GlobalWorkerOptions.workerSrc = assetBase + 'pdf.worker.min.mjs';
 
     let pdfDocument = null;
@@ -211,7 +225,14 @@
     }
 
     function updateRecordGeometry(record) {
-      record.viewport = record.page.getViewport({ scale: pageScale(record.page) });
+      const nextViewport = record.page.getViewport({ scale: pageScale(record.page) });
+      if (record.viewport &&
+          Math.abs(record.viewport.width - nextViewport.width) < 0.5 &&
+          Math.abs(record.viewport.height - nextViewport.height) < 0.5) {
+        record.viewport = nextViewport;
+        return; // unchanged: avoid canceling renders and zeroing canvases (focus-mode flicker)
+      }
+      record.viewport = nextViewport;
       record.element.style.width = record.viewport.width + 'px';
       record.element.style.height = record.viewport.height + 'px';
       record.canvas.style.width = record.viewport.width + 'px';
@@ -228,7 +249,9 @@
 
     async function renderRecord(record) {
       if (record.rendered || record.renderTask || !record.viewport) return;
-      const pixelRatio = Math.min(window.devicePixelRatio || 1, maxCanvasPixelRatio);
+      const desired = (window.devicePixelRatio || 1) * Math.max(1, renderScaleHint);
+      const pageArea = Math.max(1, record.viewport.width * record.viewport.height);
+      const pixelRatio = Math.max(1, Math.min(desired, maxRenderRatio, Math.sqrt(pagePixelBudget / pageArea)));
       const canvas = record.canvas;
       const context = canvas.getContext('2d', { alpha: false });
       canvas.width = Math.max(1, Math.floor(record.viewport.width * pixelRatio));
@@ -245,12 +268,58 @@
       try {
         await task.promise;
         record.rendered = true;
+        classifyPage(record);
         drawHighlights(record);
       } catch (error) {
         if (error && error.name !== 'RenderingCancelledException') console.warn('PDF page render failed', error);
       } finally {
         if (record.renderTask === task) record.renderTask = null;
       }
+    }
+
+    // v1.3.0 smart dark mode: sample a tiny downscale of the rendered page and mark
+    // pages whose content is dominated by colorful (photo/illustration) pixels, so
+    // dark mode can keep them natural instead of inverting faces into negatives.
+    function classifyPage(record) {
+      try {
+        const canvas = record.canvas;
+        if (!canvas || !canvas.width || !canvas.height) return;
+        const targetHeight = 48;
+        const ratio = canvas.width / canvas.height;
+        const w = Math.max(1, Math.round(targetHeight * ratio));
+        const h = targetHeight;
+        const off = document.createElement('canvas');
+        off.width = w;
+        off.height = h;
+        const octx = off.getContext('2d', { willReadFrequently: true });
+        if (!octx) return;
+        octx.drawImage(canvas, 0, 0, w, h);
+        const data = octx.getImageData(0, 0, w, h).data;
+        let colorful = 0;
+        let total = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          const mx = Math.max(data[i], data[i + 1], data[i + 2]);
+          const mn = Math.min(data[i], data[i + 1], data[i + 2]);
+          if (mx - mn > 40) colorful++;
+          total++;
+        }
+        record.element.classList.toggle('photo', total > 0 && (colorful / total) > 0.04);
+      } catch (_) { /* classification is best-effort */ }
+    }
+
+    // v1.3.0 crisp zoom: called by Android (onScaleChanged) after a pinch settles.
+    // Re-renders the already-visible pages with a higher backing resolution WITHOUT
+    // changing the CSS layout, so the page does not jump — Google Drive behavior.
+    function setPdfRenderScale(scale) {
+      const next = Math.max(1, Math.min(5, Number(scale) || 1));
+      if (Math.abs(next - renderScaleHint) < 0.05) return;
+      renderScaleHint = next;
+      pageRecords.forEach(function (record) {
+        if (record.rendered && record.canvas && record.canvas.width > 0 && !record.renderTask) {
+          record.rendered = false;
+          renderRecord(record);
+        }
+      });
     }
 
     function releaseRecord(record) {
@@ -511,8 +580,13 @@
       if (event.target && event.target.closest && event.target.closest('button, a, input, textarea, select')) return;
       bridgeCall('onPdfSingleTap');
     });
+    let resizeTimer = null;
     window.addEventListener('resize', function () {
-      if (pdfDocument && pageRecords.length) setPdfZoom(currentZoom);
+      if (!pdfDocument || !pageRecords.length) return;
+      clearTimeout(resizeTimer);
+      // Debounced: resizing the WebView (focus mode, rotation) used to cancel and
+      // re-render every page per frame, flashing blank canvases mid-transition.
+      resizeTimer = setTimeout(function () { setPdfZoom(currentZoom); }, 180);
     });
 
     window.searchPdf = searchPdf;
@@ -520,6 +594,7 @@
     window.gotoPdfPage = goToPdfPage;
     window.setPdfNightMode = setPdfNightMode;
     window.setPdfZoom = setPdfZoom;
+    window.setPdfRenderScale = setPdfRenderScale;
     window.submitPdfPassword = submitPdfPassword;
     window.clearPdfSearch = function () {
       latestRequestId++;

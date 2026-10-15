@@ -92,6 +92,7 @@ object ViewerAppearancePrefs {
     private const val KEY_THEME = "syntax_theme"
     private const val KEY_FONT_SIZE = "viewer_font_size_sp"
     private const val KEY_ZOOM_PERCENT = "viewer_zoom_percent"
+    private const val KEY_DOCX_ZOOM_PERCENT = "docx_zoom_percent"
 
     fun getTheme(context: Context): ViewerSyntaxTheme {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -123,6 +124,20 @@ object ViewerAppearancePrefs {
     fun setZoomPercent(context: Context, percent: Int) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putInt(KEY_ZOOM_PERCENT, percent.coerceIn(25, 500)).apply()
+    }
+
+    /**
+     * Persisted DOCX zoom in percent (25 - 500). Defaults to the shipped 40% opening zoom.
+     * Used by the preview screen to remember the user's last DOCX zoom across sessions.
+     */
+    fun getDocxZoomPercent(context: Context): Int {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getInt(KEY_DOCX_ZOOM_PERCENT, 40).coerceIn(25, 500)
+    }
+
+    fun setDocxZoomPercent(context: Context, percent: Int) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putInt(KEY_DOCX_ZOOM_PERCENT, percent.coerceIn(25, 500)).apply()
     }
 }
 
