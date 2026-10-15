@@ -420,12 +420,15 @@ fun FilePreviewScreen(
                         }
 
                         val activeExtension = activeFile?.extension?.lowercase().orEmpty()
+                        // TXT/Markdown keep the established reader chrome: avoid duplicating
+                        // the lower floating controls with the newer upper utility actions.
+                        val isPlainDocument = activeExtension in setOf("txt", "md")
                         val isTextState = fileState is MainViewModel.FileContentState.TextSuccess ||
                             activeExtension in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
                         val canCustomizeAppearance = activeExtension in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql")
                         val canShowOutline = activeExtension in setOf("md", "pdf", "docx")
                         val canUseImmersive = activeExtension in setOf("pdf", "docx", "txt", "md", "png", "jpg", "jpeg", "webp", "gif", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
-                        if (isTextState) {
+                        if (isTextState && !isPlainDocument) {
                             IconButton(onClick = {
                                 val textToCopy = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
                                     ?: runCatching { activeFile?.let { java.io.File(it.path).readText() } }.getOrNull()
@@ -444,7 +447,7 @@ fun FilePreviewScreen(
                             }
                         }
 
-                        if (canCustomizeAppearance) {
+                        if (canCustomizeAppearance && !isPlainDocument) {
                             IconButton(onClick = { isWebRenderActive = !isWebRenderActive }) {
                                 Icon(
                                     imageVector = if (isWebRenderActive) Icons.Outlined.Code else Icons.Outlined.Language,
@@ -459,7 +462,7 @@ fun FilePreviewScreen(
                                 Icon(Icons.Default.Settings, contentDescription = "Appearance")
                             }
                         }
-                        if (canShowOutline) {
+                        if (canShowOutline && !isPlainDocument) {
                             IconButton(onClick = { showOutlineSheet = true }) {
                                 Icon(Icons.Default.MenuBook, contentDescription = "Document outline")
                             }
