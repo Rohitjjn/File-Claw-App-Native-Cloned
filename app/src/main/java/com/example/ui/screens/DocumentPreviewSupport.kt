@@ -1,5 +1,10 @@
 package com.example.ui.screens
 
+import android.content.Context
+import android.content.Intent
+import androidx.core.content.FileProvider
+import java.io.File
+
 import com.example.core.text.FencedCodeParser
 import com.example.core.text.FencedCodeSegment
 
@@ -223,3 +228,35 @@ internal fun buildPlainTextPreviewHtml(content: String, isDark: Boolean, fontSiz
         </html>
     """.trimIndent()
 }
+
+/** Escapes plain text before embedding it in generated HTML. */
+internal fun escapeHtml(value: String): String = value
+    .replace("&", "&amp;")
+    .replace("<", "&lt;")
+    .replace(">", "&gt;")
+    .replace("\"", "&quot;")
+    .replace("'", "&#39;")
+
+/** Opens a PDF with an installed external viewer using a scoped content URI. */
+internal fun openPdfInBrowser(context: Context, file: File) {
+    if (!file.isFile || !file.canRead()) {
+        android.widget.Toast.makeText(context, "PDF file is unavailable or cannot be read", android.widget.Toast.LENGTH_LONG).show()
+        return
+    }
+
+    val uri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file
+    )
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, "application/pdf")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    try {
+        context.startActivity(Intent.createChooser(intent, "Open PDF with"))
+    } catch (_: android.content.ActivityNotFoundException) {
+        android.widget.Toast.makeText(context, "No PDF viewer is installed", android.widget.Toast.LENGTH_LONG).show()
+    }
+}
+
