@@ -47,6 +47,9 @@ object TextFileSearchEngine {
         var accountedByteEnd = 0L
         var pendingHighSurrogate: Char? = null
         var totalMatches = 0
+        // Byte offset just past the last counted match: candidates that start inside it
+        // overlap an already-reported hit and must not be double-counted across chunks.
+        var lastCountedMatchEndByte = -1L
 
         fun processChunk(chunk: String) {
             if (!shouldContinue()) throw java.util.concurrent.CancellationException("Text search cancelled")
@@ -62,9 +65,11 @@ object TextFileSearchEngine {
                 bytesBeforeCursor += combined.substring(charCursor, matchAt).toByteArray(charset).size
                 val matchByteOffset = baseByte + bytesBeforeCursor
                 val matchEnd = matchAt + needle.length
-                if (matchEnd > carry.length) {
+                val matchEndByteOffset = matchByteOffset + combined.substring(matchAt, matchEnd).toByteArray(charset).size
+                if (matchEnd > carry.length && matchByteOffset >= lastCountedMatchEndByte) {
                     if (totalMatches < Int.MAX_VALUE) totalMatches++
                     if (matches.size < maxMatches) matches += TextFileSearchMatch(matchByteOffset)
+                    lastCountedMatchEndByte = matchEndByteOffset
                 }
                 bytesBeforeCursor += combined.substring(matchAt, matchEnd).toByteArray(charset).size
                 charCursor = matchEnd

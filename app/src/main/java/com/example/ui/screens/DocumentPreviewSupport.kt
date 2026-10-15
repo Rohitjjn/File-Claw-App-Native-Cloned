@@ -117,6 +117,120 @@ internal val DocumentPreviewScript = """
         return searchMatches.length ? highlightSearchMatch(currentMatchIdx - 1) : 0;
       }
 
+      // ---- Outline & Go-to-Line navigation -----------------------------------------
+      var lineFlashTimer = null;
+
+      function flashElement(element) {
+        if (!element) return;
+        try {
+          element.classList.remove('line-anchor-flash');
+          // Force a reflow so re-triggering restarts the CSS animation.
+          void element.offsetWidth;
+          element.classList.add('line-anchor-flash');
+          if (lineFlashTimer) window.clearTimeout(lineFlashTimer);
+          lineFlashTimer = window.setTimeout(function () {
+            element.classList.remove('line-anchor-flash');
+          }, 1600);
+        } catch (e) { /* non-fatal */ }
+      }
+
+      // Scrolls to the Nth (0-based) heading element of the rendered document.
+      function scrollToHeadingIndex(index) {
+        var root = document.getElementById('document-content') || document.body;
+        var headings = root.querySelectorAll('h1, h2, h3, h4, h5, h6');
+        var target = headings.length ? headings[Math.max(0, parseInt(index, 10) || 0)] : null;
+        if (!target) return false;
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        flashElement(target);
+        return true;
+      }
+
+      // Scrolls to a source line by walking text nodes and counting newlines.
+      // Exact for plain text (pre blocks keep real newlines); approximate for
+      // rendered markdown whose block layout collapses blank lines.
+      function scrollToLine(targetLine) {
+        var root = document.getElementById('document-content') || document.body;
+        var line = Math.max(1, parseInt(targetLine, 10) || 1);
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+          acceptNode: function (node) {
+            var parent = node.parentElement;
+            if (!parent || !node.nodeValue) return NodeFilter.FILTER_REJECT;
+            if (parent.closest && parent.closest('script,style,button,.code-header')) return NodeFilter.FILTER_REJECT;
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        });
+        var currentLine = 1;
+        var node;
+        while ((node = walker.nextNode())) {
+          if (currentLine >= line) {
+            var range = document.createRange();
+            try {
+              range.setStart(node, 0);
+              range.collapse(true);
+              var span = document.createElement('span');
+              span.className = 'line-anchor-flash';
+              range.insertNode(span);
+              span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              window.setTimeout(function () {
+                if (span.parentNode) {
+                  span.parentNode.replaceChild(document.createTextNode(span.textContent || ''), span);
+                  span.parentNode.normalize();
+                }
+              }, 1600);
+            } catch (e) {
+              if (node.parentElement) {
+                node.parentElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                flashElement(node.parentElement);
+              }
+            }
+            return true;
+          }
+          var text = node.nodeValue || '';
+          var remaining = line - currentLine;
+          var pos = -1;
+          for (var i = 0; i < remaining; i++) {
+            pos = text.indexOf('\n', pos + 1);
+            if (pos < 0) break;
+          }
+          if (pos >= 0) {
+            // The requested line starts inside this node; retry loop targeting it directly.
+            var range2 = document.createRange();
+            try {
+              range2.setStart(node, Math.min(pos + 1, text.length));
+              range2.collapse(true);
+              var span2 = document.createElement('span');
+              span2.className = 'line-anchor-flash';
+              range2.insertNode(span2);
+              span2.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              window.setTimeout(function () {
+                if (span2.parentNode) {
+                  span2.parentNode.replaceChild(document.createTextNode(span2.textContent || ''), span2);
+                  span2.parentNode.normalize();
+                }
+              }, 1600);
+            } catch (e) {
+              if (node.parentElement) {
+                node.parentElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                flashElement(node.parentElement);
+              }
+            }
+            return true;
+          }
+          var matches = text.match(/\n/g);
+          currentLine += matches ? matches.length : 0;
+        }
+        return false;
+      }
+
+      // ---- Browser-style viewer zoom (25% - 500%) ----------------------------------
+      function setViewerZoom(percent) {
+        var p = parseInt(percent, 10);
+        if (isNaN(p)) p = 100;
+        p = Math.max(25, Math.min(500, p));
+        document.body.style.zoom = (p / 100);
+        return p;
+      }
+
       function copyCode(button, codeElement) {
         var codeText = codeElement ? (codeElement.textContent || '') : '';
         if (window.Android && window.Android.copyToClipboard) {
@@ -176,9 +290,15 @@ internal val DocumentPreviewScript = """
 """.trimIndent()
 
 /** Makes a safe HTML rendering of a TXT file while keeping fenced code copyable as separate blocks. */
-internal fun buildPlainTextPreviewHtml(content: String, isDark: Boolean, fontSizePx: Int): String {
-    val background = if (isDark) "#151514" else "#faf9f5"
-    val foreground = if (isDark) "#d1cfc7" else "#3d3d3a"
+internal fun buildPlainTextPreviewHtml(
+    content: String,
+    isDark: Boolean,
+    fontSizePx: Int,
+    themeBgHex: String? = null,
+    themeFgHex: String? = null
+): String {
+    val background = themeBgHex ?: if (isDark) "#151514" else "#faf9f5"
+    val foreground = themeFgHex ?: if (isDark) "#d1cfc7" else "#3d3d3a"
     val codeBackground = if (isDark) "#1f1e1b" else "#efe9de"
     val codeHeader = if (isDark) "#252320" else "#e8e0d2"
     val border = if (isDark) "#383530" else "#e6dfd8"
@@ -220,6 +340,7 @@ internal fun buildPlainTextPreviewHtml(content: String, isDark: Boolean, fontSiz
             .code-content pre { white-space: pre; overflow-wrap: normal; }
             .search-highlight { background: #ffe082; color: #17130a; border-radius: 2px; }
             .search-highlight-active { background: #ff9800; color: #17130a; outline: 2px solid #e65100; }
+            .line-anchor-flash { background: #ffe082; color: #17130a; border-radius: 2px; outline: 2px solid #ff9800; transition: background 0.4s ease; }
             @media print { .code-header, .copy-btn { display: none !important; } .code-block-container { break-inside: avoid; } }
           </style>
           $DocumentPreviewScript

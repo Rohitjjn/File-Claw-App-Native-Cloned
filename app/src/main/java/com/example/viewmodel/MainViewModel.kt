@@ -345,6 +345,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentFileState = MutableStateFlow<FileContentState>(FileContentState.Idle)
     val currentFileState: StateFlow<FileContentState> = _currentFileState.asStateFlow()
 
+    /**
+     * Inline edit mode for MD/TXT preview: the preview screen stays in place and morphs into an
+     * editor instead of pushing a separate editor route. The draft text itself is intentionally
+     * kept as transient Compose state inside [com.example.ui.screens.FilePreviewScreen] (same
+     * pattern as EditorScreen) so no TextFieldValue ever leaks into the ViewModel.
+     */
+    private val _isEditMode = MutableStateFlow(false)
+    val isEditMode: StateFlow<Boolean> = _isEditMode.asStateFlow()
+
+    /** Enters inline edit mode for the currently open text file. Returns false when not allowed. */
+    fun enterEditMode(): Boolean {
+        val current = _currentFileState.value as? FileContentState.TextSuccess ?: return false
+        if (!current.editable) return false
+        _isEditMode.value = true
+        return true
+    }
+
+    /** Leaves inline edit mode and drops any unconfirmed draft (call only after user confirmation). */
+    fun exitEditMode() {
+        _isEditMode.value = false
+    }
+
     private val _expandedZipPaths = MutableStateFlow<Set<String>>(emptySet())
     val expandedZipPaths: StateFlow<Set<String>> = _expandedZipPaths.asStateFlow()
 

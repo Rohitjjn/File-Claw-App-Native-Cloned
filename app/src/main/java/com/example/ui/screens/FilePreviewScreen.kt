@@ -98,7 +98,23 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.LightMode
-
+import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.filled.FormatBold
+import androidx.compose.material.icons.filled.FormatItalic
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.material.icons.outlined.FormatIndentIncrease
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
+import com.example.ui.component.DocumentOutlineParser
+import com.example.ui.component.ViewerSyntaxTheme
+import com.example.ui.component.ViewerAppearancePrefs
 import android.media.MediaPlayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -112,6 +128,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+
+/** Where the in-document viewer should scroll next (outline tap / go-to-line). */
+data class ViewerScrollRequest(
+    val lineNumber: Int,
+    val headingIndex: Int? = null
+)
 
 private const val MAX_TEXT_PRINT_CHARS = 2_000_000
 
@@ -180,13 +202,30 @@ fun FilePreviewScreen(
     var showJumpDialog by remember { mutableStateOf(false) }
     var showJumpToLineDialog by remember { mutableStateOf(false) }
     var showDocxZoomDialog by remember { mutableStateOf(false) }
-    var scrollToLineNumber by remember { mutableStateOf<Int?>(null) }
     var showOutlineBottomSheet by remember { mutableStateOf(false) }
     var showAppearanceBottomSheet by remember { mutableStateOf(false) }
     var docxZoomFactor by remember(activeFile?.path) { mutableFloatStateOf(1.0f) }
     var docxZoomInput by remember(activeFile?.path) { mutableStateOf("100") }
     var searchTriggerNext by remember { mutableIntStateOf(0) }
     var searchTriggerPrev by remember { mutableIntStateOf(0) }
+
+    // --- Inline edit mode state (MD/TXT): the preview screen itself becomes the editor ---
+    val isEditMode by viewModel.isEditMode.collectAsState()
+    var editTextValue by remember { mutableStateOf(TextFieldValue("")) }
+    var editOriginalContent by remember { mutableStateOf("") }
+    val editUndoStack = remember { TextUndoStack(50) }
+    val editRedoStack = remember { TextUndoStack(50) }
+    var showEditHistoryDialog by remember { mutableStateOf(false) }
+    var showDiscardEditsDialog by remember { mutableStateOf(false) }
+    var showSaveConfirmDialog by remember { mutableStateOf(false) }
+    var showEditSaveAsDialog by remember { mutableStateOf(false) }
+    val hasUnsavedEdits = isEditMode && editTextValue.text != editOriginalContent
+
+    // --- Viewer appearance state (MD/TXT): theme, font size and browser-style zoom ---
+    var viewerSyntaxTheme by remember { mutableStateOf(ViewerSyntaxTheme.AUTO) }
+    var viewerFontSizeSp by remember { mutableIntStateOf(16) }
+    var viewerZoomPercent by remember { mutableIntStateOf(100) }
+    var pendingScrollRequest by remember { mutableStateOf<ViewerScrollRequest?>(null) }
 
     var isSearchInDocumentOpen by rememberSaveable { mutableStateOf(false) }
     var inViewerSearchQuery by rememberSaveable { mutableStateOf("") }
@@ -227,6 +266,35 @@ fun FilePreviewScreen(
 
     val context = LocalContext.current
     val printScope = rememberCoroutineScope()
+
+    // Seed the inline editor with the currently displayed content every time edit mode starts.
+    LaunchedEffect(isEditMode) {
+        if (isEditMode) {
+            val seedContent = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content.orEmpty()
+            editTextValue = TextFieldValue(seedContent)
+            editOriginalContent = seedContent
+            editUndoStack.clear()
+            editRedoStack.clear()
+        }
+    }
+
+    // Load persisted viewer appearance preferences once per screen instance.
+    LaunchedEffect(Unit) {
+        viewerSyntaxTheme = ViewerAppearancePrefs.getTheme(context)
+        viewerFontSizeSp = ViewerAppearancePrefs.getFontSize(context)
+        viewerZoomPercent = ViewerAppearancePrefs.getZoomPercent(context)
+    }
+
+    // Auto-focus the in-document search field (and raise the keyboard) when the overlay opens.
+    val searchFieldFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(isSearchInDocumentOpen, isBarsVisible) {
+        if (isSearchInDocumentOpen && isBarsVisible) {
+            delay(220)
+            searchFieldFocusRequester.requestFocus()
+            keyboardController?.show()
+        }
+    }
 
     // Restore previously opened file state on recreate
     // Attempted once per screen instance (process-death recovery). Without the flag, "Remove from history"
@@ -351,7 +419,11 @@ fun FilePreviewScreen(
     }
 
     androidx.activity.compose.BackHandler {
-        handleBack()
+        if (isEditMode) {
+            if (hasUnsavedEdits) showDiscardEditsDialog = true else viewModel.exitEditMode()
+        } else {
+            handleBack()
+        }
     }
 
     val activity = context as? android.app.Activity
@@ -445,65 +517,16 @@ fun FilePreviewScreen(
 
                 ClaudeAppBar(
                     title = titleText,
-                    onNavIconClick = handleBack,
-                    navIcon = Icons.AutoMirrored.Filled.ArrowBack,
+                    onNavIconClick = if (isEditMode) {
+                        {
+                            // X icon: discard changes with confirmation when dirty.
+                            if (hasUnsavedEdits) showDiscardEditsDialog = true else viewModel.exitEditMode()
+                        }
+                    } else {
+                        handleBack
+                    },
+                    navIcon = if (isEditMode) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack,
                     actions = {
-                        val canSearchInDoc = activeFile?.extension?.lowercase() in setOf("pdf", "docx", "txt", "md")
-                        if (canSearchInDoc) {
-                            IconButton(onClick = { isSearchInDocumentOpen = !isSearchInDocumentOpen }) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Search,
-                                    contentDescription = "Find in document",
-                                    tint = if (isSearchInDocumentOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-
-                        val extLower = activeFile?.extension?.lowercase() ?: ""
-                        val hasOutline = extLower in setOf("md", "markdown", "docx", "doc", "txt", "pdf")
-                        if (hasOutline) {
-                            IconButton(onClick = { showOutlineBottomSheet = true }) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Outlined.Toc,
-                                    contentDescription = "Document Outline",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-
-                        // Focus Mode / Immersive Toggle
-                        IconButton(onClick = { isBarsVisible = !isBarsVisible }) {
-                            Icon(
-                                imageVector = if (isBarsVisible) Icons.Outlined.Fullscreen else Icons.Outlined.FullscreenExit,
-                                contentDescription = "Toggle Focus Mode",
-                                tint = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        val isTextState = fileState is MainViewModel.FileContentState.TextSuccess ||
-                            (activeFile?.extension?.lowercase() in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv"))
-                        if (isTextState) {
-                            IconButton(onClick = {
-                                val textState = fileState as? MainViewModel.FileContentState.TextSuccess
-                                val entity = activeFile
-                                if (textState != null && !textState.truncated) {
-                                    copyTextToClipboard(context, entity?.name ?: "File Content", textState.content)
-                                } else if (textState != null && entity != null) {
-                                    printScope.launch {
-                                        readBoundedText(java.io.File(entity.path), textState.charsetName)
-                                            .onSuccess { copyTextToClipboard(context, entity.name, it) }
-                                            .onFailure { showTextOperationError(context, it) }
-                                    }
-                                }
-                            }) {
-                                Icon(
-                                    imageVector = Icons.Outlined.ContentCopy,
-                                    contentDescription = "Copy all text",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-
                         Box {
                             IconButton(onClick = { showMenu = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "More Options")
@@ -517,8 +540,10 @@ fun FilePreviewScreen(
                                     text = { Text("Share file") },
                                     onClick = {
                                         showMenu = false
-                                        activeFile?.let { fileEntity ->
-                                            shareFile(context, File(fileEntity.path), fileEntity.extension)
+                                        if (!isEditMode) {
+                                            activeFile?.let { fileEntity ->
+                                                shareFile(context, File(fileEntity.path), fileEntity.extension)
+                                            }
                                         }
                                     },
                                     leadingIcon = {
@@ -528,6 +553,36 @@ fun FilePreviewScreen(
                                         )
                                     }
                                 )
+
+                                if (isEditMode) {
+                                    DropdownMenuItem(
+                                        text = { Text("Save changes", fontWeight = FontWeight.Bold) },
+                                        onClick = {
+                                            showMenu = false
+                                            if (hasUnsavedEdits) showSaveConfirmDialog = true else viewModel.exitEditMode()
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Default.Save,
+                                                contentDescription = "Save changes",
+                                                tint = if (hasUnsavedEdits) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                            )
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Export modified copy…") },
+                                        onClick = {
+                                            showMenu = false
+                                            showEditSaveAsDialog = true
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Outlined.DriveFileMove,
+                                                contentDescription = "Export modified copy"
+                                            )
+                                        }
+                                    )
+                                }
 
                                 val isPdf = activeFile?.extension?.lowercase() == "pdf"
                                 val isDocx = activeFile?.extension?.lowercase() in setOf("docx", "doc")
@@ -577,6 +632,7 @@ fun FilePreviewScreen(
                                     }
                                 }
 
+                                val hasOutline = activeFile?.extension?.lowercase() in setOf("md", "markdown", "txt") && !isEditMode
                                 if (hasOutline) {
                                     DropdownMenuItem(
                                         text = { Text("Document Outline") },
@@ -1006,6 +1062,152 @@ fun FilePreviewScreen(
                                         )
                                     }
                                 } else if (isText) {
+                                    if (isEditMode) {
+                                        // Inline editing tray — replaces the reading tray in place,
+                                        // keeping the exact same floating pill so the screen never jumps.
+                                        // Undo
+                                        IconButton(
+                                            onClick = {
+                                                if (editUndoStack.isNotEmpty) {
+                                                    val prevState = editUndoStack.pop()
+                                                    if (prevState != null) {
+                                                        editRedoStack.push(editTextValue)
+                                                        editTextValue = prevState
+                                                    }
+                                                }
+                                            },
+                                            enabled = editUndoStack.isNotEmpty,
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Undo,
+                                                contentDescription = "Undo",
+                                                modifier = Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+
+                                        // Redo
+                                        IconButton(
+                                            onClick = {
+                                                if (editRedoStack.isNotEmpty) {
+                                                    val nextState = editRedoStack.pop()
+                                                    if (nextState != null) {
+                                                        editUndoStack.push(editTextValue)
+                                                        editTextValue = nextState
+                                                    }
+                                                }
+                                            },
+                                            enabled = editRedoStack.isNotEmpty,
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Redo,
+                                                contentDescription = "Redo",
+                                                modifier = Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+
+                                        // Tab indent
+                                        IconButton(
+                                            onClick = {
+                                                applyTabIndent(editTextValue.text, editTextValue.selection, settings.tabSize)?.let { result ->
+                                                    editUndoStack.push(editTextValue)
+                                                    editRedoStack.clear()
+                                                    editTextValue = TextFieldValue(result.text, result.newSelection)
+                                                }
+                                            },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Outlined.FormatIndentIncrease,
+                                                contentDescription = "Insert tab indent",
+                                                modifier = Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+
+                                        // Markdown bold
+                                        IconButton(
+                                            onClick = {
+                                                editUndoStack.push(editTextValue)
+                                                editRedoStack.clear()
+                                                applyMarkdownWrap(editTextValue.text, editTextValue.selection, "**").let { result ->
+                                                    editTextValue = TextFieldValue(result.text, result.newSelection)
+                                                }
+                                            },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.FormatBold,
+                                                contentDescription = "Bold (markdown)",
+                                                modifier = Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+
+                                        // Markdown italic
+                                        IconButton(
+                                            onClick = {
+                                                editUndoStack.push(editTextValue)
+                                                editRedoStack.clear()
+                                                applyMarkdownWrap(editTextValue.text, editTextValue.selection, "*").let { result ->
+                                                    editTextValue = TextFieldValue(result.text, result.newSelection)
+                                                }
+                                            },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.FormatItalic,
+                                                contentDescription = "Italic (markdown)",
+                                                modifier = Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+
+                                        // Undo history viewer
+                                        IconButton(
+                                            onClick = { showEditHistoryDialog = true },
+                                            enabled = editUndoStack.isNotEmpty,
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.History,
+                                                contentDescription = "Edit history",
+                                                modifier = Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+
+                                        // Save pill with confirmation
+                                        Surface(
+                                            shape = RoundedCornerShape(18.dp),
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.clickable {
+                                                if (hasUnsavedEdits) showSaveConfirmDialog = true else viewModel.exitEditMode()
+                                            }
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Save,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    "Save",
+                                                    color = MaterialTheme.colorScheme.onPrimary,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    } else {
                                     // Find in Text
                                     IconButton(
                                         onClick = { isSearchInDocumentOpen = !isSearchInDocumentOpen },
@@ -1104,7 +1306,17 @@ fun FilePreviewScreen(
                                         Surface(
                                             shape = RoundedCornerShape(18.dp),
                                             color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.clickable { onNavigateToEditor() }
+                                            modifier = Modifier.clickable {
+                                                // Inline edit: keep this same screen and morph it into
+                                                // an editor instead of opening a separate editor route.
+                                                if (!viewModel.enterEditMode()) {
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        "This file can't be edited here",
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            }
                                         ) {
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
@@ -1138,6 +1350,7 @@ fun FilePreviewScreen(
                                             modifier = Modifier.size(18.dp),
                                             tint = MaterialTheme.colorScheme.onSurface
                                         )
+                                    }
                                     }
                                 }
                             }
@@ -1270,7 +1483,7 @@ fun FilePreviewScreen(
                                 singleLine = true,
                                 textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                                 cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth().focusRequester(searchFieldFocusRequester)
                             )
                         }
 
@@ -1462,7 +1675,24 @@ fun FilePreviewScreen(
                             }
                         }
                         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                            when (state.file.extension.lowercase()) {
+                            if (isEditMode) {
+                                // Inline editing workspace: sits on the exact same surface as the
+                                // preview canvas (no line-number gutter) so the screen keeps looking
+                                // like the preview — the user simply starts typing in place.
+                                InlineEditWorkspace(
+                                    value = editTextValue,
+                                    onValueChange = { newValue ->
+                                        val textChanged = newValue.text != editTextValue.text
+                                        if (textChanged) {
+                                            editUndoStack.push(editTextValue)
+                                            editRedoStack.clear()
+                                        }
+                                        editTextValue = newValue
+                                    },
+                                    settings = settings,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else when (state.file.extension.lowercase()) {
                                 "md" -> MarkdownPreview(
                                     markdownText = completeContent,
                                     fileEntity = state.file,
@@ -1479,6 +1709,11 @@ fun FilePreviewScreen(
                                         }
                                     },
                                     onSingleTap = { isBarsVisible = !isBarsVisible },
+                                    syntaxTheme = viewerSyntaxTheme,
+                                    viewerFontSizeSp = viewerFontSizeSp,
+                                    zoomPercent = viewerZoomPercent,
+                                    scrollRequest = pendingScrollRequest,
+                                    onScrollRequestHandled = { pendingScrollRequest = null },
                                     modifier = Modifier.fillMaxSize()
                                 )
                                 "txt" -> PlainTextPreview(
@@ -1496,6 +1731,11 @@ fun FilePreviewScreen(
                                         }
                                     },
                                     onSingleTap = { isBarsVisible = !isBarsVisible },
+                                    syntaxTheme = viewerSyntaxTheme,
+                                    viewerFontSizeSp = viewerFontSizeSp,
+                                    zoomPercent = viewerZoomPercent,
+                                    scrollRequest = pendingScrollRequest,
+                                    onScrollRequestHandled = { pendingScrollRequest = null },
                                     modifier = Modifier.fillMaxSize()
                                 )
                                 else -> WebViewPreview(
@@ -1667,7 +1907,16 @@ fun FilePreviewScreen(
                     onClick = {
                         val lNum = lineInput.toIntOrNull()
                         if (lNum != null && lNum > 0) {
-                            scrollToLineNumber = lNum
+                            // MD files: jump by heading when the target line is a heading,
+                            // otherwise fall back to approximate line scrolling.
+                            val extLower = activeFile?.extension?.lowercase().orEmpty()
+                            val outlineContent = (fileState as? MainViewModel.FileContentState.TextSuccess)?.let { fullPreviewText ?: it.content }.orEmpty()
+                            val headingIndex = if (extLower in setOf("md", "markdown")) {
+                                DocumentOutlineParser.parseHeadings(outlineContent)
+                                    .indexOfFirst { it.lineNumber == lNum }
+                                    .takeIf { it >= 0 }
+                            } else null
+                            pendingScrollRequest = ViewerScrollRequest(lineNumber = lNum, headingIndex = headingIndex)
                         } else {
                             android.widget.Toast.makeText(context, "Invalid line number", android.widget.Toast.LENGTH_SHORT).show()
                         }
@@ -1820,6 +2069,182 @@ fun FilePreviewScreen(
             text = { Text("Do you want to open this link in your browser?\n\n$pendingLinkToOpen") }
         )
     }
+
+    // Document Outline bottom sheet (MD/TXT): lists every heading and jumps to it.
+    if (showOutlineBottomSheet && activeFile != null && !isEditMode) {
+        val outlineContent = (fileState as? MainViewModel.FileContentState.TextSuccess)
+            ?.let { fullPreviewText ?: it.content }.orEmpty()
+        val isMarkdownFile = activeFile.extension.lowercase() in setOf("md", "markdown")
+        DocumentOutlineBottomSheet(
+            documentContent = outlineContent,
+            documentTitle = activeFile.name,
+            onDismissRequest = { showOutlineBottomSheet = false },
+            onSelectHeading = { lineNumber ->
+                val headingIndex = if (isMarkdownFile) {
+                    DocumentOutlineParser.parseHeadings(outlineContent)
+                        .indexOfFirst { it.lineNumber == lineNumber }
+                        .takeIf { it >= 0 }
+                } else null
+                pendingScrollRequest = ViewerScrollRequest(lineNumber = lineNumber, headingIndex = headingIndex)
+            }
+        )
+    }
+
+    // Viewer Appearance bottom sheet (text files): theme, font size and browser-style zoom.
+    if (showAppearanceBottomSheet) {
+        AppearanceBottomSheet(
+            currentTheme = viewerSyntaxTheme,
+            currentFontSizeSp = viewerFontSizeSp,
+            onThemeChanged = { viewerSyntaxTheme = it },
+            onFontSizeChanged = { viewerFontSizeSp = it },
+            currentZoomPercent = viewerZoomPercent,
+            onZoomChanged = { viewerZoomPercent = it },
+            onDismissRequest = { showAppearanceBottomSheet = false }
+        )
+    }
+
+    // ---- Inline edit mode dialogs ------------------------------------------------
+
+    // X (top bar) confirmation: discard unsaved changes?
+    if (showDiscardEditsDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardEditsDialog = false },
+            title = {
+                Text(
+                    "Discard changes?",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            text = { Text("Your edits to this file have not been saved yet. Discard them?") },
+            dismissButton = {
+                TextButton(onClick = { showDiscardEditsDialog = false }) {
+                    Text("Keep editing", color = MaterialTheme.colorScheme.onSurface)
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDiscardEditsDialog = false
+                        viewModel.exitEditMode()
+                    }
+                ) {
+                    Text("Discard", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                }
+            },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    // Save confirmation: writes the draft through the charset-safe save pipeline.
+    if (showSaveConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showSaveConfirmDialog = false },
+            title = {
+                Text(
+                    "Save changes?",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = { Text("Save your edits to \"${activeFile?.name ?: "this file"}\"? A .bak backup of the original is kept automatically.") },
+            dismissButton = {
+                TextButton(onClick = { showSaveConfirmDialog = false }) {
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showSaveConfirmDialog = false
+                        val entity = activeFile
+                        if (entity != null) {
+                            viewModel.saveTextFile(entity, editTextValue.text)
+                            editOriginalContent = editTextValue.text
+                            viewModel.exitEditMode()
+                        }
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    // Undo history viewer for the inline editor.
+    if (showEditHistoryDialog) {
+        EditHistoryDialog(
+            entries = editUndoStack.snapshot(),
+            onDismissRequest = { showEditHistoryDialog = false },
+            onRestore = { restored ->
+                editUndoStack.push(editTextValue)
+                editRedoStack.clear()
+                editTextValue = restored
+            }
+        )
+    }
+
+    // Export the modified draft as a fresh copy without touching the original file.
+    if (showEditSaveAsDialog && activeFile != null) {
+        val defaultCopyName = remember(activeFile.name) {
+            val dotIdx = activeFile.name.lastIndexOf('.')
+            if (dotIdx > 0) {
+                activeFile.name.substring(0, dotIdx) + "_copy." + activeFile.extension
+            } else {
+                activeFile.name + "_copy"
+            }
+        }
+        var copyNameInput by remember { mutableStateOf(defaultCopyName) }
+        AlertDialog(
+            onDismissRequest = { showEditSaveAsDialog = false },
+            title = {
+                Text(
+                    text = "Export Modified Copy",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Atomically save your edits into a new copy without overwriting the original file:",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = copyNameInput,
+                        onValueChange = { copyNameInput = it },
+                        singleLine = true,
+                        label = { Text("File Name") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditSaveAsDialog = false }) {
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (copyNameInput.isNotBlank()) {
+                            viewModel.exportCopy(activeFile, copyNameInput.trim(), editTextValue.text)
+                            showEditSaveAsDialog = false
+                        }
+                    }
+                ) {
+                    Text("Export Copy")
+                }
+            },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
 }
 
 @Composable
@@ -1844,11 +2269,16 @@ fun MarkdownPreview(
     searchTriggerPrev: Int = 0,
     onSearchResultCount: (Int, Int, Boolean) -> Unit = { _, _, _ -> },
     onSingleTap: () -> Unit = {},
+    syntaxTheme: ViewerSyntaxTheme = ViewerSyntaxTheme.AUTO,
+    viewerFontSizeSp: Int = 16,
+    zoomPercent: Int = 100,
+    scrollRequest: ViewerScrollRequest? = null,
+    onScrollRequestHandled: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var generatedHtml by remember(markdownText, isNightMode, fontSizeSetting) { mutableStateOf<String?>(null) }
+    var generatedHtml by remember(markdownText, isNightMode, viewerFontSizeSp, syntaxTheme) { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(markdownText, isNightMode, fontSizeSetting) {
+    LaunchedEffect(markdownText, isNightMode, viewerFontSizeSp, syntaxTheme) {
         val htmlContent = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             val parser = org.intellij.markdown.parser.MarkdownParser(org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor())
             val parsedTree = parser.buildMarkdownTreeFromString(markdownText)
@@ -1857,21 +2287,21 @@ fun MarkdownPreview(
                 keepImages = true
             )
 
-            val fontSize = when (fontSizeSetting) {
-                "Small" -> "14px"
-                "Large" -> "20px"
-                else -> "16px"
-            }
+            // Viewer Appearance drives the base font size; falls back to the settings mapping.
+            val fontSize = "${viewerFontSizeSp.coerceIn(11, 22)}px"
 
             // Claude Theme Colors (EXACT from File Claw - MD Preview Theme Fix Prompt)
-            val bgColor = if (isNightMode) "#151514" else "#faf9f5" // canvas
-            val textPrimary = if (isNightMode) "#f5f5f3" else "#141413" // ink
-            val textBody = if (isNightMode) "#d1cfc7" else "#3d3d3a" // body
-            val textBodyStrong = if (isNightMode) "#faf9f5" else "#252523" // body_strong
-            val textSecondary = if (isNightMode) "#a39f93" else "#6c6a64" // muted
-            val textSecondarySoft = if (isNightMode) "#8e8779" else "#8e8b82" // muted_soft
-            val accent = if (isNightMode) "#e08567" else "#cc785c" // primary (coral)
-            val accentActive = if (isNightMode) "#f09a7d" else "#a9583e" // primary_active
+            // A chosen syntax theme overrides the base canvas/ink/accent tokens; AUTO keeps
+            // the light/dark palette derived from the app theme.
+            val useThemeOverride = !syntaxTheme.isAuto
+            val bgColor = if (useThemeOverride) syntaxTheme.hexBg else if (isNightMode) "#151514" else "#faf9f5" // canvas
+            val textPrimary = if (useThemeOverride) syntaxTheme.hexText else if (isNightMode) "#f5f5f3" else "#141413" // ink
+            val textBody = if (useThemeOverride) syntaxTheme.hexText else if (isNightMode) "#d1cfc7" else "#3d3d3a" // body
+            val textBodyStrong = if (useThemeOverride) syntaxTheme.hexText else if (isNightMode) "#faf9f5" else "#252523" // body_strong
+            val textSecondary = if (useThemeOverride) syntaxTheme.hexText else if (isNightMode) "#a39f93" else "#6c6a64" // muted
+            val textSecondarySoft = if (useThemeOverride) syntaxTheme.hexText else if (isNightMode) "#8e8779" else "#8e8b82" // muted_soft
+            val accent = if (useThemeOverride) syntaxTheme.hexAccent else if (isNightMode) "#e08567" else "#cc785c" // primary (coral)
+            val accentActive = if (useThemeOverride) syntaxTheme.hexAccent else if (isNightMode) "#f09a7d" else "#a9583e" // primary_active
             val border = if (isNightMode) "#2d2b28" else "#e6dfd8" // hairline
             val borderSoft = if (isNightMode) "#211f1d" else "#ebe6df" // hairline_soft
             val cardBg = if (isNightMode) "#2a2723" else "#efe9de" // surface_card
@@ -2051,6 +2481,7 @@ fun MarkdownPreview(
                     }
                     .search-highlight { background: #ffe082; color: #17130a; border-radius: 2px; }
                     .search-highlight-active { background: #ff9800; color: #17130a; outline: 2px solid #e65100; }
+                    .line-anchor-flash { background: #ffe082; color: #17130a; border-radius: 2px; outline: 2px solid #ff9800; transition: background 0.4s ease; }
                     @media print { .code-header, .copy-btn { display: none !important; } .code-block-container { break-inside: avoid; } }
                 </style>
                 $DocumentPreviewScript
@@ -2066,12 +2497,21 @@ fun MarkdownPreview(
 
     SearchableDocumentWebView(
         html = generatedHtml,
-        backgroundColor = if (isNightMode) 0xFF151514.toInt() else 0xFFfaf9f5.toInt(),
+        backgroundColor = if (syntaxTheme.isAuto) {
+            if (isNightMode) 0xFF151514.toInt() else 0xFFfaf9f5.toInt()
+        } else {
+            runCatching {
+                android.graphics.Color.parseColor(syntaxTheme.hexBg)
+            }.getOrDefault(if (isNightMode) 0xFF151514.toInt() else 0xFFfaf9f5.toInt())
+        },
         searchQuery = searchQuery,
         searchTriggerNext = searchTriggerNext,
         searchTriggerPrev = searchTriggerPrev,
         onSearchResultCount = onSearchResultCount,
         onSingleTap = onSingleTap,
+        zoomPercent = zoomPercent,
+        scrollRequest = scrollRequest,
+        onScrollRequestHandled = onScrollRequestHandled,
         loadingMessage = "Preparing Document...",
         modifier = modifier
     )
@@ -2087,27 +2527,40 @@ private fun PlainTextPreview(
     searchTriggerPrev: Int,
     onSearchResultCount: (Int, Int, Boolean) -> Unit,
     onSingleTap: () -> Unit,
+    syntaxTheme: ViewerSyntaxTheme = ViewerSyntaxTheme.AUTO,
+    viewerFontSizeSp: Int = 16,
+    zoomPercent: Int = 100,
+    scrollRequest: ViewerScrollRequest? = null,
+    onScrollRequestHandled: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var generatedHtml by remember(content, isDarkMode, fontSizeSetting) { mutableStateOf<String?>(null) }
-    LaunchedEffect(content, isDarkMode, fontSizeSetting) {
-        val fontSizePx = when (fontSizeSetting) {
-            "Small" -> 13
-            "Large" -> 18
-            else -> 15
-        }
+    var generatedHtml by remember(content, isDarkMode, viewerFontSizeSp, syntaxTheme) { mutableStateOf<String?>(null) }
+    LaunchedEffect(content, isDarkMode, viewerFontSizeSp, syntaxTheme) {
+        // Viewer Appearance drives the base font size; falls back to the settings mapping.
+        val fontSizePx = viewerFontSizeSp.coerceIn(11, 22)
         generatedHtml = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            buildPlainTextPreviewHtml(content, isDarkMode, fontSizePx)
+            val themeBg = if (syntaxTheme.isAuto) null else syntaxTheme.hexBg
+            val themeFg = if (syntaxTheme.isAuto) null else syntaxTheme.hexText
+            buildPlainTextPreviewHtml(content, isDarkMode, fontSizePx, themeBg, themeFg)
         }
     }
     SearchableDocumentWebView(
         html = generatedHtml,
-        backgroundColor = if (isDarkMode) 0xFF151514.toInt() else 0xFFfaf9f5.toInt(),
+        backgroundColor = if (syntaxTheme.isAuto) {
+            if (isDarkMode) 0xFF151514.toInt() else 0xFFfaf9f5.toInt()
+        } else {
+            runCatching {
+                android.graphics.Color.parseColor(syntaxTheme.hexBg)
+            }.getOrDefault(if (isDarkMode) 0xFF151514.toInt() else 0xFFfaf9f5.toInt())
+        },
         searchQuery = searchQuery,
         searchTriggerNext = searchTriggerNext,
         searchTriggerPrev = searchTriggerPrev,
         onSearchResultCount = onSearchResultCount,
         onSingleTap = onSingleTap,
+        zoomPercent = zoomPercent,
+        scrollRequest = scrollRequest,
+        onScrollRequestHandled = onScrollRequestHandled,
         loadingMessage = "Preparing Text...",
         modifier = modifier
     )
@@ -2123,6 +2576,9 @@ private fun SearchableDocumentWebView(
     onSearchResultCount: (Int, Int, Boolean) -> Unit,
     onSingleTap: () -> Unit,
     loadingMessage: String,
+    zoomPercent: Int = 100,
+    scrollRequest: ViewerScrollRequest? = null,
+    onScrollRequestHandled: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -2206,6 +2662,28 @@ private fun SearchableDocumentWebView(
         } else if (searchTriggerNext < lastIssuedNext) {
             lastIssuedNext = searchTriggerNext
             lastIssuedPrev = searchTriggerPrev
+        }
+    }
+
+    // Browser-style zoom (25% - 500%) applied live, mirroring the DOCX setZoom pipeline.
+    LaunchedEffect(webViewRef, isPageReady, zoomPercent) {
+        val webView = webViewRef
+        if (webView != null && isPageReady) {
+            webView.evaluateJavascript("setViewerZoom($zoomPercent);", null)
+        }
+    }
+
+    // Outline / go-to-line jumps. Prefer exact heading anchoring when available.
+    LaunchedEffect(webViewRef, isPageReady, scrollRequest) {
+        val webView = webViewRef
+        if (webView != null && isPageReady && scrollRequest != null) {
+            val script = if (scrollRequest.headingIndex != null) {
+                "var __ok = scrollToHeadingIndex(${scrollRequest.headingIndex}); if (!__ok) { scrollToLine(${scrollRequest.lineNumber}); }"
+            } else {
+                "scrollToLine(${scrollRequest.lineNumber});"
+            }
+            webView.evaluateJavascript(script, null)
+            onScrollRequestHandled()
         }
     }
 
