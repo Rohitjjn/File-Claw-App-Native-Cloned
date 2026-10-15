@@ -330,6 +330,7 @@ fun FilePreviewScreen(
                     navIcon = Icons.AutoMirrored.Filled.ArrowBack,
                     actions = {
                         val canSearchInDoc = fileState is MainViewModel.FileContentState.PdfSuccess ||
+                            fileState is MainViewModel.FileContentState.DocxSuccess ||
                             fileState is MainViewModel.FileContentState.TextSuccess ||
                             (activeFile?.extension?.lowercase() in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv"))
                         if (canSearchInDoc) {
@@ -347,7 +348,7 @@ fun FilePreviewScreen(
                             activeExtension in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
                         val canCustomizeAppearance = activeExtension in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql")
                         val canShowOutline = activeExtension in setOf("md", "pdf", "docx")
-                        val canUseImmersive = activeExtension in setOf("pdf", "png", "jpg", "jpeg", "webp", "gif", "txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
+                        val canUseImmersive = activeExtension in setOf("pdf", "docx", "txt", "md", "png", "jpg", "jpeg", "webp", "gif", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
                         if (isTextState) {
                             IconButton(onClick = {
                                 val textToCopy = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
