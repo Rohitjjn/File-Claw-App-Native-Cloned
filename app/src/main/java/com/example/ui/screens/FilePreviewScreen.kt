@@ -3913,10 +3913,20 @@ fun DocxPreviewWebView(
                     onWebViewReady(webView)
                     // Keep appearance changes in sync without rebuilding the document.
                     webView.evaluateJavascript(
-                        "document.body.classList.toggle('dark', $isNightMode); " +
-                            "document.querySelectorAll('.docx').forEach(function(page) { " +
-                            "page.style.backgroundColor = " + (if (isNightMode) "'#1e1e1d'" else "'#ffffff'") + "; " +
-                            "page.style.color = " + (if (isNightMode) "'#f5f5f3'" else "'#141413'") + "; });",
+                        "(function(){document.body.classList.toggle('dark', $isNightMode); " +
+                            "var old=document.getElementById('fileclaw-theme-override'); if(old)old.remove(); " +
+                            "var style=document.createElement('style'); style.id='fileclaw-theme-override'; " +
+                            "style.textContent=" + org.json.JSONObject.quote(
+                                if (isNightMode) {
+                                    "body, body .docx { background:#1e1e1d !important; color:#f5f5f3 !important; } " +
+                                    "body .docx p, body .docx span, body .docx div, body .docx td, body .docx th, body .docx li, body .docx h1, body .docx h2, body .docx h3, body .docx h4 { color:#f5f5f3 !important; } " +
+                                    "body .docx table, body .docx td, body .docx th { border-color:#555 !important; } " +
+                                    "body .docx img { filter:none !important; }"
+                                } else {
+                                    "body, body .docx { background:#ffffff !important; color:#141413 !important; } " +
+                                    "body .docx table, body .docx td, body .docx th { border-color:#d0d0d0 !important; }"
+                                }
+                            ) + "; document.head.appendChild(style);})();",
                         null
                     )
                 },
