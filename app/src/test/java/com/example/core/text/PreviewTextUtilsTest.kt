@@ -41,4 +41,33 @@ class PreviewTextUtilsTest {
     fun ignoresUnclosedFences() {
         assertTrue(PreviewTextUtils.extractFencedCodeBlocks("before\n```js\nalert(1)").isEmpty())
     }
+
+    @Test
+    fun findsRepeatedUnicodeMatchesAtUtf16Offsets() {
+        val content = "Café 🙂 CAFÉ café"
+        assertEquals(listOf(0, 8, 13), PreviewTextUtils.findMatchOffsets(content, "café"))
+    }
+
+    @Test
+    fun respectsMaximumMatchCountForRepeatedTerms() {
+        assertEquals(listOf(0, 2), PreviewTextUtils.findMatchOffsets("aaaaaa", "aa", maxResults = 2))
+    }
+
+    @Test
+    fun supportsCrLfFencesAndFenceLengthRules() {
+        val source = "before\r\n````kotlin\r\nval marker = \"```\"\r\n````\r\nafter"
+        val blocks = PreviewTextUtils.extractFencedCodeBlocks(source)
+        assertEquals(1, blocks.size)
+        assertEquals("kotlin", blocks.single().language)
+        assertEquals("val marker = \"```\"\n", blocks.single().code)
+    }
+
+    @Test
+    fun ignoresShorterFenceWhenClosingLongFence() {
+        val source = "````kotlin\nline 1\n```\nline 2\n````"
+        val blocks = PreviewTextUtils.extractFencedCodeBlocks(source)
+        assertEquals(1, blocks.size)
+        assertEquals("line 1\n```\nline 2\n", blocks.single().code)
+    }
+}
 }
