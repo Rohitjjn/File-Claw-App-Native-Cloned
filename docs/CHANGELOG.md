@@ -1,3 +1,11 @@
+## Loop 9 — Four-format preview reliability follow-up (in progress)
+
+- Wrapped the TXT/Markdown print adapter so its temporary WebView is disposed after Android calls the adapter's finish lifecycle callback, rather than being abandoned after the print sheet opens.
+- Escaped the print document title as well as its content before interpolation into HTML; added user-visible errors for unavailable print service and print-start exceptions.
+- Expanded `PreviewTextUtilsTest` coverage for repeated Unicode matches and UTF-16 offsets, result caps, CRLF fences, embedded backticks, and fence-length rules.
+- Added `docs/loops/LOOP_10_NEXT_LOOP_PROMPT.md`, which prioritizes real-device evidence and verified defects in PDF, DOCX, TXT and Markdown.
+- CI and real-device verification are pending for this Loop 9 commit; these changes are not yet claimed as device-tested.
+
 ## Loop 8 — Document preview polish (in progress)
 
 - Added document-specific PrintManager routing: PDFs are printed page-by-page through Android's PDF renderer, DOCX uses its rendered WebView, and TXT/Markdown remain readable text print jobs.
