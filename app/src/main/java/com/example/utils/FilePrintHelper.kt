@@ -137,7 +137,7 @@ object FilePrintHelper {
                             java.io.FileOutputStream(destination.fileDescriptor).use { output ->
                                 document!!.writeTo(output)
                             }
-                            callback.onWriteFinished(arrayOf(PageRange(0, outputPageNumber - 1)))
+                            callback.onWriteFinished(arrayOf(PageRange(0, (outputPageNumber - 1).coerceAtLeast(0))))
                         }
                     }
                 } catch (e: Exception) {
