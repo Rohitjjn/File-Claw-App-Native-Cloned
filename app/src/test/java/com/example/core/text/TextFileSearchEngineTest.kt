@@ -84,7 +84,7 @@ class TextFileSearchEngineTest {
 
     @Test(expected = java.util.concurrent.CancellationException::class)
     fun allowsCallerToCancelALongScan() {
-        val input = file("cancel.txt", "word ".repeat(100))
+        val input = file("cancel.txt", "word ".repeat(100).toByteArray())
         TextFileSearchEngine.search(input, "word", bufferSize = 4, shouldContinue = { false })
     }
 
