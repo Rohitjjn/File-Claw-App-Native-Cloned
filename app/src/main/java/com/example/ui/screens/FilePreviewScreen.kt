@@ -157,7 +157,8 @@ fun FilePreviewScreen(
     }
 
     var isWebRenderActive by remember(activeFile) {
-        mutableStateOf(true)
+        // Keep the established native reader UI as the default for plain text and Markdown.
+        mutableStateOf(activeFile?.extension?.lowercase() !in setOf("txt", "md"))
     }
 
     // HTML files are untrusted input: scripts stay off until the user opts in for this file.
@@ -189,6 +190,7 @@ fun FilePreviewScreen(
     var currentMatchIndex by remember { mutableStateOf(0) }
     var totalMatchesCount by remember { mutableStateOf(0) }
     var pdfSearchResults by remember { mutableStateOf<List<PdfSearchResult>>(emptyList()) }
+    var docxWebView by remember(activeFile?.path) { mutableStateOf<android.webkit.WebView?>(null) }
 
     // PDF search effect
     LaunchedEffect(inViewerSearchQuery, activeFile?.path, fileState) {
@@ -213,20 +215,17 @@ fun FilePreviewScreen(
     // Text search effect
     val textContent = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content ?: ""
     val textMatches = remember(textContent, inViewerSearchQuery) {
-        if (inViewerSearchQuery.length >= 2 && textContent.isNotEmpty()) {
-            val list = mutableListOf<Int>()
-            var idx = textContent.indexOf(inViewerSearchQuery, ignoreCase = true)
-            while (idx >= 0 && list.size < 500) {
-                list.add(idx)
-                idx = textContent.indexOf(inViewerSearchQuery, idx + inViewerSearchQuery.length.coerceAtLeast(1), ignoreCase = true)
-            }
-            list
+        if (inViewerSearchQuery.length >= 2) {
+            com.example.core.text.PreviewTextUtils.findMatchOffsets(textContent, inViewerSearchQuery)
         } else emptyList()
     }
-    LaunchedEffect(textMatches) {
+    LaunchedEffect(textMatches, textContent, fileState) {
         if (fileState is MainViewModel.FileContentState.TextSuccess) {
             totalMatchesCount = textMatches.size
             currentMatchIndex = 0
+            scrollToLineNumber = textMatches.firstOrNull()?.let { offset ->
+                textContent.substring(0, offset).count { it == '\n' } + 1
+            }
         }
     }
 
@@ -249,13 +248,42 @@ fun FilePreviewScreen(
         }
         (activityContext as? android.app.Activity)?.window
     }
+    val originalStatusBarColor = remember(previewWindow) { previewWindow?.statusBarColor }
+    val originalNavigationBarColor = remember(previewWindow) { previewWindow?.navigationBarColor }
+    val originalSystemUiVisibility = remember(previewView) { previewView.systemUiVisibility }
     DisposableEffect(previewWindow, previewView, isBarsVisible) {
-        val controller = previewWindow?.let { androidx.core.view.WindowInsetsControllerCompat(it, previewView) }
+        val window = previewWindow
+        val controller = window?.let { androidx.core.view.WindowInsetsControllerCompat(it, previewView) }
         controller?.systemBarsBehavior =
             androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         val systemBars = androidx.core.view.WindowInsetsCompat.Type.systemBars()
-        if (isBarsVisible) controller?.show(systemBars) else controller?.hide(systemBars)
-        onDispose { controller?.show(systemBars) }
+        if (!isBarsVisible && window != null) {
+            androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            previewView.systemUiVisibility =
+                android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            controller?.hide(systemBars)
+        } else {
+            if (window != null) {
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, true)
+                originalStatusBarColor?.let { window.statusBarColor = it }
+                originalNavigationBarColor?.let { window.navigationBarColor = it }
+            }
+            previewView.systemUiVisibility = originalSystemUiVisibility
+            controller?.show(systemBars)
+        }
+        onDispose {
+            controller?.show(systemBars)
+            if (window != null) {
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, true)
+                originalStatusBarColor?.let { window.statusBarColor = it }
+                originalNavigationBarColor?.let { window.navigationBarColor = it }
+            }
+            previewView.systemUiVisibility = originalSystemUiVisibility
+        }
     }
 
     LaunchedEffect(activeFile?.path) { isBarsVisible = true }
