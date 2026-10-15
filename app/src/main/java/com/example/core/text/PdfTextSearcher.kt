@@ -3,7 +3,6 @@ package com.example.core.text
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.util.Locale
 import java.util.zip.InflaterInputStream
 
 data class PdfSearchResult(
@@ -12,118 +11,137 @@ data class PdfSearchResult(
 )
 
 /**
- * Lightweight PDF content-stream scanner, including /FlateDecode streams.
- * This is not a full PDF text engine: font encodings and exact physical page ownership
- * are not always recoverable from raw stream order alone.
+ * Pure Kotlin, zero-dependency PDF text searcher.
+ * Parses PDF page content streams (including /FlateDecode compressed streams)
+ * to locate occurrences of a search keyword by page number.
  */
 object PdfTextSearcher {
 
     fun searchInPdf(file: File, query: String, maxResults: Int = 100): List<PdfSearchResult> {
-        if (!file.exists() || query.isBlank() || maxResults <= 0) return emptyList()
+        if (!file.exists() || query.isBlank()) return emptyList()
         return try {
-            searchInBytes(file.readBytes(), query, maxResults)
-        } catch (_: Exception) {
+            val bytes = file.readBytes()
+            searchInBytes(bytes, query.trim(), maxResults)
+        } catch (e: Exception) {
             emptyList()
         }
     }
 
     fun searchInBytes(bytes: ByteArray, query: String, maxResults: Int = 100): List<PdfSearchResult> {
-        if (bytes.isEmpty() || query.isBlank() || maxResults <= 0) return emptyList()
-        val normalizedQuery = normalizeSearchText(query)
-        if (normalizedQuery.isEmpty()) return emptyList()
+        if (bytes.isEmpty() || query.isBlank()) return emptyList()
 
         val results = mutableListOf<PdfSearchResult>()
-        for ((streamIndex, stream) in extractStreams(bytes).withIndex()) {
-            val text = normalizeSearchText(extractTextFromStream(stream))
-            val matchIndex = text.indexOf(normalizedQuery)
-            if (matchIndex >= 0) {
-                val start = (matchIndex - SNIPPET_CONTEXT_CHARS).coerceAtLeast(0)
-                val end = (matchIndex + normalizedQuery.length + SNIPPET_CONTEXT_CHARS).coerceAtMost(text.length)
-                results.add(
-                    PdfSearchResult(
-                        pageNumber = streamIndex + 1,
-                        matchedText = text.substring(start, end)
-                    )
-                )
-                if (results.size >= maxResults) return results
+        val queryLower = query.lowercase()
+
+        // 1. Locate all stream ... endstream blocks
+        val streams = extractStreams(bytes)
+
+        // 2. Extract text from each stream and check for matches
+        var estimatedPage = 1
+        for (stream in streams) {
+            val text = extractTextFromStream(stream)
+            if (text.contains(queryLower)) {
+                // Find snippet
+                val idx = text.indexOf(queryLower)
+                val start = (idx - 20).coerceAtLeast(0)
+                val end = (idx + query.length + 20).coerceAtMost(text.length)
+                val snippet = text.substring(start, end).replace('\n', ' ').trim()
+
+                results.add(PdfSearchResult(pageNumber = estimatedPage, matchedText = snippet))
+                if (results.size >= maxResults) break
+            }
+            estimatedPage++
+        }
+
+        // If no stream-based match found, do a raw byte-scan fallback for uncompressed PDFs
+        if (results.isEmpty()) {
+            val rawText = String(bytes, Charsets.ISO_8859_1).lowercase()
+            if (rawText.contains(queryLower)) {
+                results.add(PdfSearchResult(pageNumber = 1, matchedText = query))
             }
         }
 
-        // Retain the legacy raw-byte fallback for uncompressed PDFs.
-        if (results.isEmpty()) {
-            val rawText = normalizeSearchText(String(bytes, Charsets.ISO_8859_1))
-            if (rawText.contains(normalizedQuery)) {
-                results.add(PdfSearchResult(pageNumber = 1, matchedText = normalizedQuery))
-            }
-        }
         return results
     }
-
-    /** Apply the same locale-stable, whitespace-collapsing normalization to queries and PDF text. */
-    internal fun normalizeSearchText(value: String): String =
-        value.lowercase(Locale.ROOT).replace(WHITESPACE, " ").trim()
 
     private fun extractStreams(bytes: ByteArray): List<ByteArray> {
         val streams = mutableListOf<ByteArray>()
         val streamTag = "stream".toByteArray(Charsets.US_ASCII)
         val endstreamTag = "endstream".toByteArray(Charsets.US_ASCII)
+
         var idx = 0
         while (idx < bytes.size - streamTag.size) {
             val streamPos = indexOf(bytes, streamTag, idx)
             if (streamPos == -1) break
+
+            // Skip "stream" and subsequent newline (\r\n or \n)
             var start = streamPos + streamTag.size
             if (start < bytes.size && bytes[start] == '\r'.code.toByte()) start++
             if (start < bytes.size && bytes[start] == '\n'.code.toByte()) start++
+
             val endstreamPos = indexOf(bytes, endstreamTag, start)
             if (endstreamPos == -1) break
+
+            // Stream length check: truncate trailing \r or \n before endstream
             var end = endstreamPos
             if (end > start && bytes[end - 1] == '\n'.code.toByte()) end--
             if (end > start && bytes[end - 1] == '\r'.code.toByte()) end--
+
             if (end > start) {
                 val streamBytes = bytes.copyOfRange(start, end)
-                streams.add(tryDecompress(streamBytes) ?: streamBytes)
+                // Attempt decompression (FlateDecode)
+                val decompressed = tryDecompress(streamBytes)
+                streams.add(decompressed ?: streamBytes)
             }
+
             idx = endstreamPos + endstreamTag.size
         }
+
         return streams
     }
 
-    private fun tryDecompress(data: ByteArray): ByteArray? = try {
-        InflaterInputStream(ByteArrayInputStream(data)).use { inflater ->
-            val buffer = ByteArray(4096)
-            val out = ByteArrayOutputStream()
-            while (true) {
-                val read = inflater.read(buffer)
-                if (read == -1) break
-                out.write(buffer, 0, read)
+    private fun tryDecompress(data: ByteArray): ByteArray? {
+        return try {
+            InflaterInputStream(ByteArrayInputStream(data)).use { inflater ->
+                val buffer = ByteArray(4096)
+                val out = ByteArrayOutputStream()
+                var read: Int
+                while (inflater.read(buffer).also { read = it } != -1) {
+                    out.write(buffer, 0, read)
+                }
+                out.toByteArray()
             }
-            out.toByteArray()
+        } catch (e: Exception) {
+            null
         }
-    } catch (_: Exception) {
-        null
     }
 
     private fun extractTextFromStream(stream: ByteArray): String {
         val str = String(stream, Charsets.ISO_8859_1)
-        val sb = StringBuilder()
+        val sb = java.lang.StringBuilder()
+
+        // Extract strings inside (...)
         var i = 0
         while (i < str.length) {
             if (str[i] == '(') {
                 val end = findMatchingParen(str, i)
                 if (end != -1) {
-                    sb.append(unescapePdfString(str.substring(i + 1, end))).append(' ')
+                    val literal = str.substring(i + 1, end)
+                    sb.append(unescapePdfString(literal)).append(" ")
                     i = end
                 }
             } else if (str[i] == '<' && i + 1 < str.length && str[i + 1] != '<') {
+                // Hex string <...>
                 val end = str.indexOf('>', i)
                 if (end != -1) {
-                    sb.append(decodeHexString(str.substring(i + 1, end).trim())).append(' ')
+                    val hex = str.substring(i + 1, end).trim()
+                    sb.append(decodeHexString(hex)).append(" ")
                     i = end
                 }
             }
             i++
         }
-        return sb.toString()
+        return sb.toString().lowercase()
     }
 
     private fun findMatchingParen(str: String, start: Int): Int {
@@ -176,25 +194,26 @@ object PdfTextSearcher {
         val sb = StringBuilder()
         var i = 0
         while (i < hex.length - 1) {
-            val code = hex.substring(i, i + 2).toIntOrNull(16)
-            if (code != null && code in 32..126) sb.append(code.toChar())
+            val hexByte = hex.substring(i, i + 2)
+            val code = hexByte.toIntOrNull(16)
+            if (code != null && code in 32..126) {
+                sb.append(code.toChar())
+            }
             i += 2
         }
         return sb.toString()
     }
 
     private fun indexOf(source: ByteArray, target: ByteArray, fromIndex: Int): Int {
-        if (target.isEmpty() || fromIndex >= source.size) return -1
+        if (target.isEmpty()) return fromIndex
         val max = source.size - target.size
-        if (fromIndex > max) return -1
         for (i in fromIndex..max) {
             var j = 0
-            while (j < target.size && source[i + j] == target[j]) j++
+            while (j < target.size && source[i + j] == target[j]) {
+                j++
+            }
             if (j == target.size) return i
         }
         return -1
     }
-
-    private val WHITESPACE = Regex("\\s+")
-    private const val SNIPPET_CONTEXT_CHARS = 20
 }
