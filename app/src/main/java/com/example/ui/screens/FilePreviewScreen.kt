@@ -191,6 +191,7 @@ fun FilePreviewScreen(
     var totalMatchesCount by remember { mutableStateOf(0) }
     var pdfSearchResults by remember { mutableStateOf<List<PdfSearchResult>>(emptyList()) }
     var docxWebView by remember(activeFile?.path) { mutableStateOf<android.webkit.WebView?>(null) }
+    var docxSearchMatchCount by remember(activeFile?.path) { mutableStateOf(0) }
 
     // PDF search effect
     LaunchedEffect(inViewerSearchQuery, activeFile?.path, fileState) {
@@ -235,6 +236,44 @@ fun FilePreviewScreen(
             if (offset != null) {
                 scrollToLineNumber = textContent.substring(0, offset).count { it == '\n' } + 1
             }
+        }
+    }
+
+    // DOCX search indexes extracted paragraphs off the UI thread, then navigates the rendered WebView.
+    LaunchedEffect(inViewerSearchQuery, activeFile?.path, fileState) {
+        val file = activeFile
+        if (fileState is MainViewModel.FileContentState.DocxSuccess && file != null && inViewerSearchQuery.length >= 2) {
+            val count = withContext(Dispatchers.IO) {
+                runCatching {
+                    val extracted = com.example.core.format.DocxExtractor.extractText(java.io.File(file.path))
+                    com.example.core.text.PreviewTextUtils.findMatchOffsets(extracted.paragraphs.joinToString("\\n"), inViewerSearchQuery).size
+                }.getOrDefault(0)
+            }
+            docxSearchMatchCount = count
+            totalMatchesCount = count
+            currentMatchIndex = 0
+            docxWebView?.post {
+                val queryJson = org.json.JSONObject.quote(inViewerSearchQuery)
+                docxWebView?.evaluateJavascript(
+                    "if (window.getSelection) window.getSelection().removeAllRanges(); window.find($queryJson, false, false, true, false, false, false);",
+                    null
+                )
+            }
+        } else if (fileState is MainViewModel.FileContentState.DocxSuccess) {
+            docxSearchMatchCount = 0
+            totalMatchesCount = 0
+            currentMatchIndex = 0
+        }
+    }
+
+    LaunchedEffect(currentMatchIndex, inViewerSearchQuery, docxWebView, fileState, docxSearchMatchCount) {
+        if (fileState is MainViewModel.FileContentState.DocxSuccess && docxWebView != null && docxSearchMatchCount > 0 && inViewerSearchQuery.length >= 2) {
+            val queryJson = org.json.JSONObject.quote(inViewerSearchQuery)
+            val targetIndex = currentMatchIndex.coerceIn(0, docxSearchMatchCount - 1)
+            docxWebView?.evaluateJavascript(
+                "(function(){if(window.getSelection)window.getSelection().removeAllRanges(); for(var i=0;i<=${targetIndex};i++){if(!window.find($queryJson,false,false,true,false,false,false))break;}})();",
+                null
+            )
         }
     }
 
@@ -945,6 +984,8 @@ fun FilePreviewScreen(
                                         scrollToPage = pdfSearchResults[currentMatchIndex].pageNumber - 1
                                     } else if (textMatches.isNotEmpty()) {
                                         currentMatchIndex = (currentMatchIndex - 1 + textMatches.size) % textMatches.size
+                                    } else if (docxSearchMatchCount > 0) {
+                                        currentMatchIndex = (currentMatchIndex - 1 + docxSearchMatchCount) % docxSearchMatchCount
                                     }
                                 },
                                 enabled = totalMatchesCount > 0,
@@ -961,6 +1002,8 @@ fun FilePreviewScreen(
                                         scrollToPage = pdfSearchResults[currentMatchIndex].pageNumber - 1
                                     } else if (textMatches.isNotEmpty()) {
                                         currentMatchIndex = (currentMatchIndex + 1) % textMatches.size
+                                    } else if (docxSearchMatchCount > 0) {
+                                        currentMatchIndex = (currentMatchIndex + 1) % docxSearchMatchCount
                                     }
                                 },
                                 enabled = totalMatchesCount > 0,
