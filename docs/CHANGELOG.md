@@ -1,3 +1,9 @@
+## Loop 8 — Document preview polish (in progress)
+
+- Added `docs/loops/LOOP_08_DOCUMENT_PREVIEW_POLISH.md` as the focused execution contract for PDF, DOCX, TXT and Markdown only.
+- Added `docs/loops/LOOP_09_NEXT_LOOP_PROMPT.md` to guide the next evidence-led review after Loop 8 verification.
+- Exposed DOCX in the in-viewer search entry point and immersive-focus action set. Search result extraction/navigation and actual device behavior still require implementation and verification; these UI entry-point changes alone do not resolve the full reported issues.
+
 # Changelog
 
 Format: [Keep a Changelog](https://keepachangelog.com). Numbers marked **(measured)** were produced by a real
