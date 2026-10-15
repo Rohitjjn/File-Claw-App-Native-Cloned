@@ -5,13 +5,14 @@
 - [x] Improved focus-mode edge-to-edge handling and restoration of system-bar/window state on exit/disposal.
 - [x] Replaced PDF private-field color-filter reflection with the renderer's public night-mode API; image-heavy/scanned PDFs may remain renderer-limited.
 - [x] Exposed DOCX in the search and immersive-focus entry points.
-- [ ] Wire search result selection to actual match highlighting and navigation for all four formats; PDF raw-stream search remains approximate.
-- [ ] Add the individual fenced-block Copy controls to Markdown and TXT rendered previews.
-- [ ] Complete correct PDF and DOCX print/export routing and WebView cleanup.
-- [ ] Complete DOCX fit-page/zoom behavior and theme styling for tables, inline runs and images.
+- [~] TXT/code-reader search now moves the viewport when Previous/Next changes the selected match; PDF page navigation exists, but raw-stream search is approximate and visual highlight behavior still needs device verification.
+- [~] Added per-fenced-block copy controls in the native TXT/code reader and retained Markdown WebView code-block copy controls; verify clipboard behavior on-device.
+- [~] Print routing now distinguishes PDF, DOCX, TXT/MD and images. PDF pages are rasterized one at a time into Android PrintManager output; DOCX prints the rendered WebView. Temporary WebView cleanup and print-service failure handling still need review.
+- [~] DOCX dark theme now styles document text/tables while leaving images untouched; fit-page behavior and actual pinch/zoom range still require device verification.
+- [~] DOCX search now counts extracted paragraph matches and uses WebView find navigation. Exact mapping between extracted paragraph offsets and rendered text must be verified against complex DOCX files.
 - [ ] Run Android unit tests, coverage, lint, Detekt and debug APK CI; perform real-device smoke checks for all four formats and navigation modes.
 
-Status note: checked items above are source changes, not a passing build or verified device behavior. Keep PR in draft until outstanding items and the verification gate are complete.
+Status note: `[~]` means implemented but not yet fully verified. GitHub Actions is running on the latest branch head; inspect the exact head SHA and final run conclusion before treating the code as build-verified. Real-device smoke tests remain required. Keep PR in draft and do not merge until the user tests the APK.
 
 # Backlog and known issues
 
