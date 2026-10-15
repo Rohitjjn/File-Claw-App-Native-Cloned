@@ -1,3 +1,14 @@
+## Loop 9 — Four-format preview reliability follow-up (in progress)
+
+- [x] Harden TXT/Markdown print-job lifecycle by keeping the temporary WebView alive through Android PrintDocumentAdapter completion and disposing it from the adapter finish callback.
+- [x] Escape both document content and title before inserting them into the print HTML; report unavailable print service and print-start errors.
+- [x] Add regression tests for repeated Unicode search matches/UTF-16 offsets, result limits, CRLF code fences, embedded backticks, and closing-fence length rules.
+- [x] Add the evidence-led Loop 10 prompt at `docs/loops/LOOP_10_NEXT_LOOP_PROMPT.md`.
+- [ ] Inspect latest GitHub Actions run for Loop 9 commit; unit tests, coverage, lint, Detekt and debug APK must pass.
+- [ ] Real-device print lifecycle, Unicode search and fenced-code copy smoke tests remain pending.
+
+Status: source edits are committed, but do not mark Loop 9 verified until the newest SHA's CI completes. No real-device test has been performed by this implementation pass.
+
 ## Loop 8 — Four-format document preview polish (in progress)
 
 - [x] Added shared case-insensitive text-match offsets and fenced-code extraction utility, with unit tests for case-insensitive occurrences, indentation-preserving copy payloads, tilde fences, multiple blocks and unclosed fences.
