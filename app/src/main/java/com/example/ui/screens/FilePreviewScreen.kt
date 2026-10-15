@@ -1921,7 +1921,7 @@ fun MarkdownPreview(
                         webView.loadDataWithBaseURL(null, generatedHtml!!, "text/html", "UTF-8", null)
                     }
                     val searchStateKey = "$searchQuery#$selectedMatchIndex"
-                    if (webView.contentDescription?.toString() != searchStateKey) {
+                    if (!isWebViewLoading && webView.contentDescription?.toString() != searchStateKey) {
                         webView.contentDescription = searchStateKey
                         if (searchQuery.length >= 2) {
                             val queryJson = org.json.JSONObject.quote(searchQuery)
