@@ -1,7 +1,7 @@
 # File Claw - Changelog
-Last Updated: June 15, 2026
-Document Version: 1.0
-Next Review Date: December 15, 2026
+Last Updated: October 15, 2026
+Document Version: 1.2
+Next Review Date: January 15, 2027
 
 ## 1. Changelog Format Rules (MANDATORY)
 - **Every entry MUST include**: Version number, Date, Change Type, Affected Files/Modules, Description.
@@ -15,21 +15,60 @@ Next Review Date: December 15, 2026
 - Example: `v1.2.4` (Major 1, Minor 2, Patch 4).
 
 ## 3. Current Version Section
-**Current Version:** v1.0.4
-**Release Date:** June 28, 2026
-**Total Changes:** Added file tree sidebar, auto-encoding support, smooth scrolling enhancements, fixed cache system, and resolved large PDF crash issues.
+**Current Version:** v1.2.0
+**Release Date:** October 15, 2026
+**Total Changes:** MD/TXT experience overhaul — light-mode status bar fix, clean top bar, working Document Outline & Viewer Appearance (with browser-style 25%–500% zoom), fully working in-document search, and a premium inline edit mode on the same screen. First loop with a fully compiled and tested build (134 unit tests green, debug APK assembled).
 
 **Highlights:**
-- Added a collapsible file tree navigation sidebar in HomeScreen drawer.
-- Configured "Auto" encoding detection by default in Settings and FileManager.
-- Integrated `Modifier.animateItemPlacement()` with `io.iamjosephmj.flinger` for 120 FPS ultra-smooth scrolling.
-- Fixed `MainViewModel` cache logic to retain up to 5 files, skipping caching for files over 30MB to save disk space and loading time.
-- Fixed large PDF crashing issue by removing Base64 conversion and loading files natively via `AndroidPdfViewer`.
+- Status bar icons now follow the in-app theme in light mode (were invisible on white canvas).
+- Top bar shows only back arrow + file name + 3-dot menu; duplicate action icons removed.
+- Document Outline and Viewer Appearance menu items are wired to real bottom sheets and work.
+- In-document search auto-focuses with the keyboard raised; matches navigate correctly.
+- Edit button morphs the preview into an editor in place (no separate screen): undo/redo/tab/bold/italic/history tray, X-to-discard confirmation, save confirmation, export modified copy.
+- Viewer Appearance gains syntax themes (incl. Auto), font size control, and browser-style zoom 25%–500% persisted across sessions.
+- Pre-existing unit-test compilation error fixed and a real overlap-dedup bug in `TextFileSearchEngine` fixed; full test suite now green.
 
 **Issues In Progress:**
-- See `known-issues.md` regarding PDF scale resetting on orientation change.
+- See `known-issues.md`; next-loop prompt lives at `docs/prompts/NEXT_LOOP_PROMPT.md`.
 
 ## 4. Version History
+
+### [v1.2.0] - MD/TXT Premium Round: Inline Edit, Outline, Appearance & Zoom (2026-10-15)
+**[FIXED]**
+- **Affected:** `ui/theme/Theme.kt`
+- **Description:** Light-mode status bar icons were invisible: `enableEdgeToEdge()` derived icon appearance from the SYSTEM dark-mode flag once at Activity creation while the visible canvas followed the IN-APP theme. `FilesClawTheme` now re-asserts `isAppearanceLightStatusBars/NavigationBars` from the in-app theme on every relevant recomposition, so icons always contrast with the actual background (and follow live theme changes).
+- **Author:** Loop 7 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt`
+- **Description:** Removed the duplicated action icon row (Search, Outline, Focus, Copy) from the preview top bar; it now keeps only back navigation, the file name, and the 3-dot menu. Focus mode remains reachable via tap gestures and the floating exit pill.
+- **Author:** Loop 7 senior-agent team
+- **Affected:** `ui/screens/DocumentPreviewSupport.kt`, `ui/screens/FilePreviewScreen.kt`
+- **Description:** In-document search in MD/TXT previews now auto-focuses the field and raises the keyboard when the overlay opens (the search pipeline itself was complete; focus was the missing UX link).
+- **Author:** Loop 7 senior-agent team
+- **Affected:** `core/text/TextFileSearchEngine.kt`
+- **Description:** Fixed cross-chunk overlap deduplication: candidates starting inside an already-counted match's byte range are no longer double-counted (regression-tested with `bufferSize=2`).
+- **Author:** Loop 7 senior-agent team
+- **Affected:** `src/test/java/com/example/core/text/TextFileSearchEngineTest.kt`
+- **Description:** Fixed pre-existing test compilation error (String passed where ByteArray expected). Full suite: 134 tests, 0 failures.
+- **Author:** Loop 7 senior-agent team
+
+**[ADDED]**
+- **Affected:** `ui/screens/FilePreviewScreen.kt`, `ui/component/DocumentOutlineBottomSheet.kt`
+- **Description:** Document Outline is now functional for MD/TXT: the previously orphaned bottom sheet is rendered from the 3-dot menu and heading taps jump to the exact heading in the WebView (heading-index anchoring with line fallback via new `scrollToHeadingIndex`/`scrollToLine` JS helpers).
+- **Author:** Loop 7 senior-agent team
+- **Affected:** `ui/component/AppearanceBottomSheet.kt`, `ui/screens/FilePreviewScreen.kt`, `ui/screens/DocumentPreviewSupport.kt`
+- **Description:** Viewer Appearance is now functional: syntax themes (Auto/Claude Glass/Nord Dark/Warm Parchment) recolor MD/TXT documents, font size (11–22sp) controls the base text size, and a browser-style DOCUMENT ZOOM section (25%–500% slider, ± buttons, presets) applies live via `setViewerZoom`. All preferences persist in `viewer_appearance_prefs`.
+- **Author:** Loop 7 senior-agent team
+- **Affected:** `viewmodel/MainViewModel.kt`, `ui/screens/InlineTextEditorSupport.kt` (new), `ui/screens/FilePreviewScreen.kt`, `ui/screens/EditorScreen.kt`
+- **Description:** Premium inline edit mode for MD/TXT: tapping Edit morphs the preview screen itself into an editor (no separate editor route, no line numbers, same surface). Bottom tray swaps in place to Undo / Redo / Tab / Bold / Italic / History / Save; the top bar swaps back-arrow for an X that discards with confirmation; save runs through the charset-safe `.bak`-backup pipeline behind a confirmation dialog; 3-dot menu gains Save changes / Export modified copy; system back honors unsaved-changes flow. Markdown-aware bold/italic wrap-toggle helpers are pure and unit-tested (`InlineTextEditTest`, 16 tests).
+- **Author:** Loop 7 senior-agent team
+
+**[CHANGED]**
+- **Affected:** `docs/prompts/`, root helper scripts, `changelogs.md`
+- **Description:** Removed archived loop prompts (LOOP_02/03/07) and all one-off patch/fix/debug scripts from previous loops; only `docs/prompts/NEXT_LOOP_PROMPT.md` (Loop 8) is kept. This changelog updated to v1.2.0.
+- **Author:** Loop 7 senior-agent team
+- **Affected:** `docs/TODO.md`
+- **Description:** Loop 6 "never compiled" known issue resolved: this loop compiled Kotlin, ran all 134 unit tests, and assembled a debug APK with Android SDK 34 + JDK 17 in CI sandbox.
+- **Author:** Loop 7 senior-agent team
 
 ### [v1.0.4] - Sidebar, Auto-Encoding & Large PDF Fixes (2026-06-28)
 **[ADDED]**

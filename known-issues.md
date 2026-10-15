@@ -1,7 +1,7 @@
 # File Claw - Known Issues & Tech Debt
-Last Updated: June 15, 2026
-Document Version: 1.0
-Next Review Date: December 15, 2026
+Last Updated: October 15, 2026
+Document Version: 1.1
+Next Review Date: January 15, 2027
 
 ## 1. Issue Classification System
 - **Severity**: `CRITICAL` (Crashes/Data Loss), `HIGH` (Core Feature Broken), `MEDIUM` (Degraded Experience), `LOW` (Cosmetic).
@@ -24,13 +24,20 @@ Next Review Date: December 15, 2026
 | BUG-005 | Password Field Obscuring | LOW| OPEN| `UI`| Keyboard overlaps the unlock dialog on small screens. |
 
 ## 4. Recently Fixed Issues
+- **Light-mode status bar icons invisible (user-reported, Loop 7)**: `enableEdgeToEdge()` set icon appearance from the system dark-mode flag once, while the canvas followed the in-app theme. *Fix*: `FilesClawTheme` now re-asserts `isAppearanceLightStatusBars/NavigationBars` on the host window whenever the in-app theme resolves (`ui/theme/Theme.kt`).
+- **Preview top bar duplicated the bottom tray (user-reported, Loop 7)**: Search/Outline/Focus/Copy icons were stacked in the top bar. *Fix*: top bar reduced to back + file name + 3-dot menu.
+- **Document Outline / Viewer Appearance menu items dead (user-reported, Loop 7)**: flags were set but the bottom sheets were never rendered. *Fix*: both sheets are now wired (outline jump + theme/font/zoom appearance).
+- **In-document search appeared broken in MD/TXT (user-reported, Loop 7)**: pipeline was complete; the search field never received focus so users could not type. *Fix*: auto-focus + keyboard raise on open.
+- **TextFileSearchEngine overlap double-count**: cross-chunk candidates starting inside a previously counted match were double-counted. *Fix*: byte-range guard + regression coverage.
+- **Test suite did not compile**: pre-existing type error in `TextFileSearchEngineTest` (String vs ByteArray). *Fix*: corrected; suite is 134/134 green as of Loop 7.
 - **PDF Password Crash**: `PdfRenderer` previously crashed wildly on encrypted files. *Fix*: Implemented `PDFBox-Android` as a robust fallback to decrypt safely into cache. Verified via local tests.
 
 ## 5. Technical Debt Register
-- **Architecture Debt**: `MainViewModel` is a God Class. It manages Home, Preview, Editor, and Navigation. MUST be split into scoped viewmodels.
-- **Testing Debt**: Automated test coverage is currently 0%.
+- **Architecture Debt**: `MainViewModel` is a God Class. It manages Home, Preview, Editor, and Navigation. MUST be split into scoped viewmodels. *(Loop 7 note: inline edit state was added minimally; a full split is planned behind the MD/TXT loops.)*
+- **Testing Debt**: Automated test coverage was 0% historically; Loop 7 restored a green 134-test suite and added the first UI-flow helper tests. Keep expanding (target: 80% core coverage via `jacocoCoreVerify`).
 - **I/O Debt**: `FileManager` utilizes older `java.io.File` APIs synchronously in many places instead of non-blocking `NIO` or strict Coroutine stream channels.
 - **String Debt**: Hardcoded UI strings exist across all Compose screens.
+- **Build Debt**: `docs/TODO.md` notes `gradlew` is tracked without the executable bit in some checkouts; run `chmod +x gradlew` after cloning (Loop 7 verified builds need this).
 
 ## 6. Platform Limitations
 - **Android Scoped Storage**: Strict file limits prevent raw `java.io.File` modifications in standard `Documents` or `Downloads` directories on API 30+ without `MANAGE_EXTERNAL_STORAGE`.
