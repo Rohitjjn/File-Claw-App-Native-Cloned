@@ -63,9 +63,23 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Unit tests
+        env:
+          READER_FIXTURE_DIR: ${{ github.workspace }}/build/reader-fixtures
         run: |
           set -o pipefail
           ./gradlew :app:testDebugUnitTest --stacktrace --no-daemon 2>&1 | tee gradle-test.log
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Markdown/TXT save round trip (Kotlin pages in jsdom)
+        run: |
+          set -o pipefail
+          cd tools/reader-js-tests
+          npm install --no-audit --no-fund > /dev/null
+          node roundtrip.js "$GITHUB_WORKSPACE/build/reader-fixtures" 2>&1 | tee "$GITHUB_WORKSPACE/roundtrip.log"
 
       - name: Assemble debug and release (R8 + lint vital)
         run: |
@@ -101,9 +115,15 @@ jobs:
               if not os.path.exists(log):
                   continue
               for line in open(log, errors="replace"):
+                  if line.startswith("> Task") and "FAILED" not in line:
+                      continue
                   if re.match(r"^e: ", line) or "error:" in line or line.startswith("> ") or "What went wrong" in line:
                       compile_errors.append(line.replace(os.getcwd() + "/", ""))
           emit("Gradle errors", compile_errors[:120])
+
+          if os.path.exists("roundtrip.log"):
+              lines = [l for l in open("roundtrip.log", errors="replace") if l.startswith(("FAIL", "  expected", "  actual", "round trip"))]
+              emit("Round trip failures", lines[:60])
 
           failures = []
           for path in glob.glob("app/build/test-results/testDebugUnitTest/*.xml"):

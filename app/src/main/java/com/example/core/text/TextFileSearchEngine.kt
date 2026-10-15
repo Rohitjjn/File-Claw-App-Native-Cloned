@@ -45,6 +45,11 @@ object TextFileSearchEngine {
         var carry = ""
         var carryByteStart = 0L
         var accountedByteEnd = 0L
+        // Absolute character positions, used to keep hits non-overlapping across chunk boundaries
+        // (the carried-over tail is scanned twice). Matches the in-page search, which never overlaps.
+        var carryCharStart = 0L
+        var accountedCharEnd = 0L
+        var lastMatchEndChar = 0L
         var pendingHighSurrogate: Char? = null
         var totalMatches = 0
 
@@ -54,9 +59,11 @@ object TextFileSearchEngine {
 
             val combined = carry + chunk
             val baseByte = if (carry.isNotEmpty()) carryByteStart else accountedByteEnd
+            val baseChar = if (carry.isNotEmpty()) carryCharStart else accountedCharEnd
             var charCursor = 0
             var bytesBeforeCursor = 0L
-            var matchAt = combined.indexOf(needle, startIndex = 0, ignoreCase = true)
+            val searchFrom = (lastMatchEndChar - baseChar).coerceIn(0L, combined.length.toLong()).toInt()
+            var matchAt = combined.indexOf(needle, startIndex = searchFrom, ignoreCase = true)
 
             while (matchAt >= 0) {
                 bytesBeforeCursor += combined.substring(charCursor, matchAt).toByteArray(charset).size
@@ -65,6 +72,7 @@ object TextFileSearchEngine {
                 if (matchEnd > carry.length) {
                     if (totalMatches < Int.MAX_VALUE) totalMatches++
                     if (matches.size < maxMatches) matches += TextFileSearchMatch(matchByteOffset)
+                    lastMatchEndChar = baseChar + matchEnd
                 }
                 bytesBeforeCursor += combined.substring(matchAt, matchEnd).toByteArray(charset).size
                 charCursor = matchEnd
@@ -73,6 +81,7 @@ object TextFileSearchEngine {
 
             val newBytes = chunk.toByteArray(charset).size.toLong()
             accountedByteEnd += newBytes
+            accountedCharEnd += chunk.length
 
             var keepChars = minOf(overlapLength, combined.length)
             val keepStart = combined.length - keepChars
@@ -83,6 +92,7 @@ object TextFileSearchEngine {
             val actualKeepStart = combined.length - keepChars
             carry = if (keepChars == 0) "" else combined.substring(actualKeepStart)
             carryByteStart = baseByte + combined.substring(0, actualKeepStart).toByteArray(charset).size
+            carryCharStart = baseChar + actualKeepStart
         }
 
         InputStreamReader(file.inputStream().buffered(bufferSize), charset).use { reader ->
