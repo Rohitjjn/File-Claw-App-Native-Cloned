@@ -144,6 +144,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.3")
     implementation("org.jetbrains:markdown:0.7.3")
+    implementation("androidx.webkit:webkit:1.12.1")
 
     // Archives and Excel (read-only). CSV/TSV is parsed by com.example.core.csv.
     implementation(libs.commons.compress)

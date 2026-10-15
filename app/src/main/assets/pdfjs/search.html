@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=0.25, maximum-scale=5, user-scalable=yes">
+  <title>File Claw PDF Reader</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --reader-background: #f0f0f0;
+      --page-background: #ffffff;
+      --page-shadow: 0 3px 16px rgba(0, 0, 0, .18);
+      --page-border: rgba(25, 25, 25, .12);
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-height: 100%; margin: 0; }
+    body {
+      overflow: auto;
+      background: var(--reader-background);
+      -webkit-text-size-adjust: 100%;
+      overscroll-behavior: contain;
+    }
+    #pdf-document {
+      display: flex;
+      min-height: 100vh;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 10px 28px;
+    }
+    .pdf-page {
+      position: relative;
+      flex: 0 0 auto;
+      overflow: hidden;
+      background: var(--page-background);
+      border: 1px solid var(--page-border);
+      box-shadow: var(--page-shadow);
+      transform-origin: top center;
+    }
+    .pdf-page canvas {
+      display: block;
+      max-width: none;
+      background: white;
+    }
+    .highlight-layer {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .pdf-search-highlight {
+      position: absolute;
+      min-width: 2px;
+      background: rgba(255, 213, 79, .64);
+      border-radius: 2px;
+      box-shadow: inset 0 0 0 1px rgba(122, 75, 0, .22);
+    }
+    .pdf-search-highlight.active {
+      background: rgba(255, 145, 0, .76);
+      outline: 2px solid rgba(230, 81, 0, .92);
+      z-index: 2;
+    }
+    body.dark {
+      color-scheme: dark;
+      --reader-background: #191a1b;
+      --page-background: #252627;
+      --page-shadow: 0 4px 20px rgba(0, 0, 0, .55);
+      --page-border: rgba(255, 255, 255, .08);
+    }
+    body.dark .pdf-page canvas {
+      filter: invert(.88) hue-rotate(180deg) contrast(.96);
+    }
+    body.dark .pdf-search-highlight {
+      background: rgba(255, 213, 79, .58);
+      box-shadow: inset 0 0 0 1px rgba(255, 236, 179, .3);
+    }
+    body.dark .pdf-search-highlight.active {
+      background: rgba(255, 145, 0, .8);
+      outline-color: rgba(255, 183, 77, .96);
+    }
+  </style>
+</head>
+<body>
+  <main id="pdf-document" aria-label="PDF document"></main>
+  <script>
+    window.addEventListener('error', function (event) {
+      if (window.Android && window.Android.onPdfError && event && event.message) {
+        window.Android.onPdfError(String(event.message));
+      }
+    });
+  </script>
+  <script type="module">
+    import * as pdfjsLib from './pdf.min.mjs';
+
+    const assetBase = '/assets/pdfjs/';
+    const pdfUrl = '/search-pdf/document.pdf';
+    const maxStoredMatches = 2000;
+    const maxRectsPerMatch = 24;
+    const maxCanvasPixelRatio = 2;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = assetBase + 'pdf.worker.min.mjs';
+
+    let pdfDocument = null;
+    let loadingPromise = null;
+    let passwordUpdater = null;
+    let indexedPages = new Map();
+    let pageRecords = [];
+    let searchMatches = [];
+    let activeMatchIndex = -1;
+    let latestRequestId = 0;
+    let currentZoom = 1;
+    let pageObserver = null;
+    let currentPage = 0;
+
+    function bridgeCall(name, ...args) {
+      try {
+        if (window.Android && typeof window.Android[name] === 'function') {
+          window.Android[name](...args);
+        }
+      } catch (error) {
+        console.error('File Claw PDF bridge failed', error);
+      }
+    }
+
+    function publishResults(payload) {
+      bridgeCall('onPdfSearchResults', JSON.stringify(payload));
+    }
+
+    function publishError(requestId, query, error) {
+      if (requestId !== latestRequestId) return;
+      bridgeCall('onPdfSearchError', JSON.stringify({
+        requestId: requestId,
+        query: query,
+        message: String(error && (error.message || error) || 'PDF text search failed')
+      }));
+    }
+
+    function escapeRegExp(value) {
+      return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function shouldInsertSpace(previous, current) {
+      if (!previous || previous.hasEOL || /\s$/.test(previous.str) || /^\s/.test(current.str)) return false;
+      const previousTransform = previous.transform;
+      const nextTransform = current.transform;
+      if (!previousTransform || !nextTransform) return false;
+      const sameLine = Math.abs(previousTransform[5] - nextTransform[5]) <= Math.max(previous.height, current.height, 1) * 0.45;
+      if (!sameLine) return true;
+      const gap = nextTransform[4] - (previousTransform[4] + previous.width);
+      return gap > Math.max(previous.height, current.height, 1) * 0.16;
+    }
+
+    async function getIndexedPage(pageNumber) {
+      if (indexedPages.has(pageNumber)) return indexedPages.get(pageNumber);
+      const page = await pdfDocument.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1 });
+      const textContent = await page.getTextContent();
+      const pieces = [];
+      let fullText = '';
+      let previous = null;
+
+      for (const item of textContent.items) {
+        if (!item || typeof item.str !== 'string' || item.str.length === 0) continue;
+        const entry = {
+          str: item.str,
+          transform: item.transform,
+          width: Math.abs(Number(item.width) || 0),
+          height: Math.abs(Number(item.height) || 0),
+          hasEOL: Boolean(item.hasEOL),
+          start: 0,
+          end: 0
+        };
+        if (previous && previous.hasEOL) fullText += '\n';
+        else if (shouldInsertSpace(previous, entry)) fullText += ' ';
+        entry.start = fullText.length;
+        fullText += entry.str;
+        entry.end = fullText.length;
+        pieces.push(entry);
+        previous = entry;
+      }
+
+      const result = { text: fullText, pieces: pieces, viewport: viewport };
+      indexedPages.set(pageNumber, result);
+      return result;
+    }
+
+    function makeRect(page, piece, localStart, localEnd) {
+      const viewport = page.viewport;
+      const transform = pdfjsLib.Util.transform(viewport.transform, piece.transform);
+      const fontHeight = Math.max(Math.hypot(transform[2], transform[3]), piece.height, 1);
+      const startFraction = piece.str.length > 0 ? localStart / piece.str.length : 0;
+      const endFraction = piece.str.length > 0 ? localEnd / piece.str.length : 1;
+      const direction = transform[0] < 0 ? -1 : 1;
+      const x1 = transform[4] + direction * piece.width * startFraction;
+      const x2 = transform[4] + direction * piece.width * endFraction;
+      const left = Math.min(x1, x2);
+      const right = Math.max(x1, x2);
+      const top = transform[5] - fontHeight;
+      const bottom = transform[5] + Math.max(1, fontHeight * .18);
+      return {
+        left: Math.max(0, Math.min(1, left / viewport.width)),
+        top: Math.max(0, Math.min(1, top / viewport.height)),
+        right: Math.max(0, Math.min(1, right / viewport.width)),
+        bottom: Math.max(0, Math.min(1, bottom / viewport.height))
+      };
+    }
+
+    function pageScale(page) {
+      const base = page.getViewport({ scale: 1 });
+      const availableWidth = Math.max(240, (window.innerWidth || document.documentElement.clientWidth || 360) - 24);
+      return Math.max(.1, Math.min(availableWidth / base.width, 2.5)) * currentZoom;
+    }
+
+    function updateRecordGeometry(record) {
+      record.viewport = record.page.getViewport({ scale: pageScale(record.page) });
+      record.element.style.width = record.viewport.width + 'px';
+      record.element.style.height = record.viewport.height + 'px';
+      record.canvas.style.width = record.viewport.width + 'px';
+      record.canvas.style.height = record.viewport.height + 'px';
+      record.rendered = false;
+      if (record.renderTask) {
+        try { record.renderTask.cancel(); } catch (_) {}
+        record.renderTask = null;
+      }
+      record.canvas.width = 0;
+      record.canvas.height = 0;
+      drawHighlights(record);
+    }
+
+    async function renderRecord(record) {
+      if (record.rendered || record.renderTask || !record.viewport) return;
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, maxCanvasPixelRatio);
+      const canvas = record.canvas;
+      const context = canvas.getContext('2d', { alpha: false });
+      canvas.width = Math.max(1, Math.floor(record.viewport.width * pixelRatio));
+      canvas.height = Math.max(1, Math.floor(record.viewport.height * pixelRatio));
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      const task = record.page.render({
+        canvasContext: context,
+        viewport: record.viewport,
+        transform: [pixelRatio, 0, 0, pixelRatio, 0, 0],
+        background: 'rgb(255,255,255)'
+      });
+      record.renderTask = task;
+      try {
+        await task.promise;
+        record.rendered = true;
+        drawHighlights(record);
+      } catch (error) {
+        if (error && error.name !== 'RenderingCancelledException') console.warn('PDF page render failed', error);
+      } finally {
+        if (record.renderTask === task) record.renderTask = null;
+      }
+    }
+
+    function releaseRecord(record) {
+      if (!record.rendered || record.renderTask) return;
+      record.canvas.width = 0;
+      record.canvas.height = 0;
+      record.rendered = false;
+    }
+
+    function drawHighlights(record) {
+      if (!record || !record.highlightLayer) return;
+      record.highlightLayer.replaceChildren();
+      for (let matchIndex = 0; matchIndex < searchMatches.length; matchIndex++) {
+        const match = searchMatches[matchIndex];
+        if (match.pageNumber !== record.pageNumber) continue;
+        for (const rect of match.rectangles) {
+          const highlight = document.createElement('div');
+          highlight.className = 'pdf-search-highlight' + (matchIndex === activeMatchIndex ? ' active' : '');
+          highlight.style.left = (rect.left * 100) + '%';
+          highlight.style.top = (rect.top * 100) + '%';
+          highlight.style.width = (Math.max(.003, rect.right - rect.left) * 100) + '%';
+          highlight.style.height = (Math.max(.002, rect.bottom - rect.top) * 100) + '%';
+          record.highlightLayer.appendChild(highlight);
+        }
+      }
+    }
+
+    function reportVisiblePage(entries) {
+      const visible = entries.filter(function (entry) { return entry.isIntersecting; });
+      if (!visible.length) return;
+      visible.sort(function (a, b) { return b.intersectionRatio - a.intersectionRatio; });
+      const viewportCenter = (window.innerHeight || 0) / 2;
+      visible.sort(function (a, b) {
+        const rectA = a.boundingClientRect;
+        const rectB = b.boundingClientRect;
+        const distanceA = Math.abs((rectA.top + rectA.bottom) / 2 - viewportCenter);
+        const distanceB = Math.abs((rectB.top + rectB.bottom) / 2 - viewportCenter);
+        return distanceA - distanceB;
+      });
+      const record = pageRecords[Number(visible[0].target.dataset.pageNumber) - 1];
+      if (record && currentPage !== record.pageNumber) {
+        currentPage = record.pageNumber;
+        bridgeCall('onPdfPageChanged', currentPage, pageRecords.length);
+      }
+    }
+
+    async function prepareDocument(documentProxy) {
+      const root = document.getElementById('pdf-document');
+      root.replaceChildren();
+      pageRecords = [];
+      indexedPages.clear();
+      currentPage = 0;
+
+      for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber++) {
+        const page = await documentProxy.getPage(pageNumber);
+        const pageElement = document.createElement('section');
+        pageElement.className = 'pdf-page';
+        pageElement.dataset.pageNumber = String(pageNumber);
+        const canvas = document.createElement('canvas');
+        canvas.setAttribute('aria-label', 'Page ' + pageNumber);
+        const highlightLayer = document.createElement('div');
+        highlightLayer.className = 'highlight-layer';
+        pageElement.appendChild(canvas);
+        pageElement.appendChild(highlightLayer);
+        root.appendChild(pageElement);
+        const record = {
+          pageNumber: pageNumber,
+          page: page,
+          element: pageElement,
+          canvas: canvas,
+          highlightLayer: highlightLayer,
+          viewport: null,
+          rendered: false,
+          renderTask: null
+        };
+        pageRecords.push(record);
+        updateRecordGeometry(record);
+        if (pageNumber % 16 === 0) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+      }
+
+      if (pageObserver) pageObserver.disconnect();
+      if ('IntersectionObserver' in window) {
+        pageObserver = new IntersectionObserver(function (entries) {
+          reportVisiblePage(entries);
+          entries.forEach(function (entry) {
+            const record = pageRecords[Number(entry.target.dataset.pageNumber) - 1];
+            if (!record) return;
+            if (entry.isIntersecting) renderRecord(record);
+            else releaseRecord(record);
+          });
+        }, { root: null, rootMargin: '900px 0px', threshold: [0, .15, .5, .85] });
+        pageRecords.forEach(function (record) { pageObserver.observe(record.element); });
+      } else {
+        pageRecords.slice(0, 4).forEach(renderRecord);
+      }
+      bridgeCall('onPdfDocumentLoaded', documentProxy.numPages);
+      if (pageRecords.length) {
+        currentPage = 1;
+        bridgeCall('onPdfPageChanged', currentPage, pageRecords.length);
+      }
+    }
+
+    async function loadPdf() {
+      if (pdfDocument) return pdfDocument;
+      if (loadingPromise) return loadingPromise;
+
+      const loadingTask = pdfjsLib.getDocument({
+        url: pdfUrl,
+        cMapUrl: assetBase + 'cmaps/',
+        cMapPacked: true,
+        standardFontDataUrl: assetBase + 'standard_fonts/',
+        isEvalSupported: false,
+        useWorkerFetch: true,
+        disableRange: true,
+        disableStream: true,
+        disableAutoFetch: true
+      });
+      loadingTask.onPassword = function (updatePassword, reason) {
+        passwordUpdater = updatePassword;
+        bridgeCall('onPdfPasswordRequired', Number(reason) || 1);
+      };
+      loadingPromise = loadingTask.promise.then(async function (documentProxy) {
+        pdfDocument = documentProxy;
+        await prepareDocument(documentProxy);
+        return documentProxy;
+      }).catch(function (error) {
+        loadingPromise = null;
+        bridgeCall('onPdfError', String(error && (error.message || error) || 'Could not open this PDF'));
+        throw error;
+      });
+      return loadingPromise;
+    }
+
+    function clearHighlights() {
+      searchMatches = [];
+      activeMatchIndex = -1;
+      pageRecords.forEach(drawHighlights);
+    }
+
+    function publishCurrentResults(requestId, query, count, truncated, searching) {
+      publishResults({
+        requestId: requestId,
+        query: query,
+        count: count,
+        truncated: Boolean(truncated),
+        searching: Boolean(searching),
+        currentIndex: activeMatchIndex,
+        // Geometry stays local to the reader; the Android bridge only needs navigation targets.
+        matches: searchMatches.map(function (match) { return { pageNumber: match.pageNumber }; })
+      });
+    }
+
+    async function searchPdf(rawQuery) {
+      const requestId = ++latestRequestId;
+      const query = String(rawQuery || '').trim();
+      clearHighlights();
+      if (!query) {
+        publishCurrentResults(requestId, query, 0, false, false);
+        return;
+      }
+      publishCurrentResults(requestId, query, 0, false, true);
+
+      try {
+        const documentProxy = await loadPdf();
+        if (requestId !== latestRequestId) return;
+        const expression = new RegExp(escapeRegExp(query), 'gi');
+        const results = [];
+        let totalCount = 0;
+
+        for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber++) {
+          if (requestId !== latestRequestId) return;
+          const page = await getIndexedPage(pageNumber);
+          expression.lastIndex = 0;
+          let match;
+          while ((match = expression.exec(page.text)) !== null) {
+            totalCount++;
+            if (results.length < maxStoredMatches) {
+              const matchStart = match.index;
+              const matchEnd = matchStart + match[0].length;
+              const rectangles = [];
+              for (const piece of page.pieces) {
+                if (piece.end <= matchStart || piece.start >= matchEnd) continue;
+                const localStart = Math.max(0, matchStart - piece.start);
+                const localEnd = Math.min(piece.str.length, matchEnd - piece.start);
+                if (localEnd > localStart) {
+                  rectangles.push(makeRect(page, piece, localStart, localEnd));
+                  if (rectangles.length >= maxRectsPerMatch) break;
+                }
+              }
+              results.push({ pageNumber: pageNumber, rectangles: rectangles });
+            }
+            if (match[0].length === 0) expression.lastIndex++;
+          }
+          if (pageNumber % 12 === 0) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+        }
+
+        if (requestId !== latestRequestId) return;
+        searchMatches = results;
+        activeMatchIndex = results.length ? 0 : -1;
+        pageRecords.forEach(drawHighlights);
+        if (activeMatchIndex >= 0) showPdfSearchMatch(activeMatchIndex);
+        publishCurrentResults(requestId, query, totalCount, totalCount > maxStoredMatches, false);
+      } catch (error) {
+        if (requestId === latestRequestId) {
+          publishError(requestId, query, error);
+        }
+      }
+    }
+
+    function showPdfSearchMatch(index) {
+      if (!searchMatches.length) {
+        activeMatchIndex = -1;
+        pageRecords.forEach(drawHighlights);
+        return -1;
+      }
+      activeMatchIndex = ((Number(index) || 0) % searchMatches.length + searchMatches.length) % searchMatches.length;
+      pageRecords.forEach(drawHighlights);
+      const match = searchMatches[activeMatchIndex];
+      const record = pageRecords[match.pageNumber - 1];
+      if (record) {
+        record.element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        renderRecord(record);
+      }
+      return activeMatchIndex;
+    }
+
+    function goToPdfPage(pageNumber) {
+      const record = pageRecords[Math.max(0, Math.min(pageRecords.length - 1, Number(pageNumber) - 1))];
+      if (record) {
+        record.element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        renderRecord(record);
+      }
+    }
+
+    function setPdfNightMode(isNight) {
+      document.body.classList.toggle('dark', Boolean(isNight));
+    }
+
+    function setPdfZoom(factor) {
+      currentZoom = Math.max(.25, Math.min(5, Number(factor) || 1));
+      pageRecords.forEach(function (record) {
+        updateRecordGeometry(record);
+        if (pageObserver) pageObserver.unobserve(record.element);
+      });
+      if (pageObserver) pageRecords.forEach(function (record) { pageObserver.observe(record.element); });
+      else pageRecords.slice(0, 4).forEach(renderRecord);
+    }
+
+    function submitPdfPassword(password) {
+      if (passwordUpdater) {
+        const updatePassword = passwordUpdater;
+        passwordUpdater = null;
+        updatePassword(String(password || ''));
+      }
+    }
+
+    document.addEventListener('click', function (event) {
+      if (event.target && event.target.closest && event.target.closest('button, a, input, textarea, select')) return;
+      bridgeCall('onPdfSingleTap');
+    });
+    window.addEventListener('resize', function () {
+      if (pdfDocument && pageRecords.length) setPdfZoom(currentZoom);
+    });
+
+    window.searchPdf = searchPdf;
+    window.showPdfSearchMatch = showPdfSearchMatch;
+    window.gotoPdfPage = goToPdfPage;
+    window.setPdfNightMode = setPdfNightMode;
+    window.setPdfZoom = setPdfZoom;
+    window.submitPdfPassword = submitPdfPassword;
+    window.clearPdfSearch = function () {
+      latestRequestId++;
+      clearHighlights();
+      publishCurrentResults(latestRequestId, '', 0, false, false);
+    };
+    window.AndroidPdfSearchReady = function () {
+      bridgeCall('onPdfSearchReady', 'ready');
+      loadPdf().catch(function () {});
+    };
+    window.AndroidPdfSearchReady();
+  </script>
+</body>
+</html>

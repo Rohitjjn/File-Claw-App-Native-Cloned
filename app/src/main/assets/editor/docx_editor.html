@@ -76,7 +76,7 @@
             box-shadow: 0 4px 24px rgba(0,0,0,0.65) !important;
             border: 1px solid #333336 !important;
         }
-        body.dark .docx * {
+        body.dark .docx *:not(mark.docx-highlight) {
             color: #e2e2e6 !important;
             border-color: #383838 !important;
         }
@@ -126,6 +126,15 @@
             color: #d32f2f;
             font-size: 14px;
         }
+        @media print {
+            html, body, body.dark, body.dark #viewport-wrapper, body.dark #output { background: #ffffff !important; color: #141413 !important; }
+            #viewport-wrapper { display: block; min-width: 0 !important; padding: 0; overflow: visible; }
+            #output { zoom: 1 !important; width: 100% !important; max-width: none !important; }
+            .docx, section.docx { margin: 0 auto !important; box-shadow: none !important; border-color: #d5d5d5 !important; break-after: page; }
+            .docx:last-child, section.docx:last-child { break-after: auto; }
+            body.dark .docx, body.dark section.docx { background: #ffffff !important; color: #141413 !important; }
+            body.dark .docx *:not(mark.docx-highlight) { color: #141413 !important; border-color: #d5d5d5 !important; }
+        }
     </style>
 </head>
 <body>
@@ -139,12 +148,16 @@
         let currentZoom = 1.0;
         let searchMatches = [];
         let currentMatchIdx = -1;
+        let totalSearchMatches = 0;
+        let searchMatchesTruncated = false;
+        const maxSearchHighlights = 5000;
 
         function setZoom(factor) {
-            currentZoom = Math.min(Math.max(factor, 0.25), 5.0);
+            const numericFactor = Number(factor);
+            currentZoom = Math.min(Math.max(Number.isFinite(numericFactor) ? numericFactor : 1.0, 0.25), 5.0);
             const container = document.getElementById("output");
             if (container) {
-                container.style.zoom = currentZoom;
+                container.style.zoom = String(currentZoom);
                 container.style.transformOrigin = "top center";
             }
             const wrapper = document.getElementById("viewport-wrapper");
@@ -153,13 +166,48 @@
             }
         }
 
+        let pageObserver = null;
+
         function setDarkMode(isDark) {
-            if (isDark) {
-                document.body.classList.add('dark');
-                document.documentElement.classList.add('dark');
-            } else {
-                document.body.classList.remove('dark');
-                document.documentElement.classList.remove('dark');
+            document.body.classList.toggle('dark', Boolean(isDark));
+            document.documentElement.classList.toggle('dark', Boolean(isDark));
+        }
+
+        function scrollToPage(pageNumber) {
+            const pages = document.querySelectorAll('#output .docx');
+            const page = pages[Math.max(0, Math.min(pages.length - 1, Number(pageNumber) - 1))];
+            if (page) page.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function observePages() {
+            if (pageObserver) pageObserver.disconnect();
+            const pages = Array.from(document.querySelectorAll('#output .docx'));
+            if (!pages.length || !('IntersectionObserver' in window)) return;
+            pageObserver = new IntersectionObserver(function (entries) {
+                const visible = entries.filter(entry => entry.isIntersecting);
+                if (!visible.length) return;
+                const center = (window.innerHeight || 0) / 2;
+                visible.sort((a, b) => {
+                    const rectA = a.boundingClientRect;
+                    const rectB = b.boundingClientRect;
+                    return Math.abs((rectA.top + rectA.bottom) / 2 - center) - Math.abs((rectB.top + rectB.bottom) / 2 - center);
+                });
+                const currentIndex = pages.indexOf(visible[0].target);
+                if (window.Android && window.Android.onPageChanged && currentIndex >= 0) {
+                    window.Android.onPageChanged(currentIndex + 1, pages.length);
+                }
+            }, { threshold: [0.15, 0.5, 0.85] });
+            pages.forEach(page => pageObserver.observe(page));
+        }
+
+        document.addEventListener('click', function (event) {
+            const target = event.target && event.target.closest ? event.target.closest('a, button, input, textarea, select') : null;
+            if (!target && window.Android && window.Android.onDocumentTap) window.Android.onDocumentTap();
+        });
+
+        function notifySearchCount() {
+            if (window.Android && window.Android.onSearchResultCount) {
+                window.Android.onSearchResultCount(totalSearchMatches, currentMatchIdx, searchMatchesTruncated);
             }
         }
 
@@ -167,79 +215,94 @@
             document.querySelectorAll('mark.docx-highlight').forEach(el => {
                 const parent = el.parentNode;
                 if (parent) {
-                    parent.replaceChild(document.createTextNode(el.textContent), el);
+                    parent.replaceChild(document.createTextNode(el.textContent || ''), el);
                     parent.normalize();
                 }
             });
             searchMatches = [];
             currentMatchIdx = -1;
+            totalSearchMatches = 0;
+            searchMatchesTruncated = false;
         }
 
         function searchWord(keyword) {
             clearSearch();
-            if (!keyword || keyword.trim().length === 0) return 0;
-            const query = keyword.trim().toLowerCase();
+            const query = String(keyword || '').trim().toLowerCase();
             const container = document.getElementById("output");
-            if (!container) return 0;
+            if (!query || !container) {
+                notifySearchCount();
+                return 0;
+            }
 
-            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null, false);
+            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+                acceptNode: function (node) {
+                    const parent = node.parentElement;
+                    if (!parent || !node.nodeValue || parent.closest('script, style, button, mark.docx-highlight')) {
+                        return NodeFilter.FILTER_REJECT;
+                    }
+                    return NodeFilter.FILTER_ACCEPT;
+                }
+            });
             const textNodes = [];
             while (walker.nextNode()) textNodes.push(walker.currentNode);
+            const foundMatches = [];
+            let totalCount = 0;
 
             for (const node of textNodes) {
-                const text = node.textContent;
+                const text = node.nodeValue || '';
                 const lower = text.toLowerCase();
                 let index = lower.indexOf(query);
-                if (index >= 0) {
-                    const frag = document.createDocumentFragment();
-                    let last = 0;
-                    while (index >= 0) {
-                        frag.appendChild(document.createTextNode(text.substring(last, index)));
+                if (index < 0) continue;
+                const fragment = document.createDocumentFragment();
+                let last = 0;
+                while (index >= 0) {
+                    totalCount++;
+                    fragment.appendChild(document.createTextNode(text.substring(last, index)));
+                    if (foundMatches.length < maxSearchHighlights) {
                         const mark = document.createElement('mark');
                         mark.className = 'docx-highlight';
                         mark.textContent = text.substring(index, index + query.length);
-                        frag.appendChild(mark);
-                        searchMatches.push(mark);
-                        last = index + query.length;
-                        index = lower.indexOf(query, last);
+                        fragment.appendChild(mark);
+                        foundMatches.push(mark);
                     }
-                    frag.appendChild(document.createTextNode(text.substring(last)));
-                    if (node.parentNode) {
-                        node.parentNode.replaceChild(frag, node);
-                    }
+                    last = index + query.length;
+                    index = lower.indexOf(query, last);
                 }
+                fragment.appendChild(document.createTextNode(text.substring(last)));
+                if (node.parentNode) node.parentNode.replaceChild(fragment, node);
             }
 
-            if (searchMatches.length > 0) {
-                currentMatchIdx = 0;
-                highlightMatch(0);
-            }
-            return searchMatches.length;
+            searchMatches = foundMatches;
+            totalSearchMatches = totalCount;
+            searchMatchesTruncated = totalCount > foundMatches.length;
+            if (searchMatches.length > 0) highlightMatch(0);
+            else notifySearchCount();
+            return totalSearchMatches;
         }
 
         function highlightMatch(idx) {
-            searchMatches.forEach((m, i) => {
-                if (i === idx) {
-                    m.className = 'docx-highlight docx-highlight-active';
-                    m.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                } else {
-                    m.className = 'docx-highlight';
-                }
+            if (!searchMatches.length) {
+                currentMatchIdx = -1;
+                notifySearchCount();
+                return 0;
+            }
+            currentMatchIdx = ((idx % searchMatches.length) + searchMatches.length) % searchMatches.length;
+            searchMatches.forEach((match, index) => {
+                match.className = index === currentMatchIdx
+                    ? 'docx-highlight docx-highlight-active'
+                    : 'docx-highlight';
             });
+            searchMatches[currentMatchIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            notifySearchCount();
+            return currentMatchIdx + 1;
         }
 
         function nextSearchMatch() {
-            if (searchMatches.length === 0) return 0;
-            currentMatchIdx = (currentMatchIdx + 1) % searchMatches.length;
-            highlightMatch(currentMatchIdx);
-            return currentMatchIdx + 1;
+            return searchMatches.length ? highlightMatch(currentMatchIdx + 1) : 0;
         }
 
         function prevSearchMatch() {
-            if (searchMatches.length === 0) return 0;
-            currentMatchIdx = (currentMatchIdx - 1 + searchMatches.length) % searchMatches.length;
-            highlightMatch(currentMatchIdx);
-            return currentMatchIdx + 1;
+            return searchMatches.length ? highlightMatch(currentMatchIdx - 1) : 0;
         }
 
         function loadDocx(base64, isDark) {
@@ -310,6 +373,7 @@
                     if (document.body.classList.contains('dark')) {
                         setDarkMode(true);
                     }
+                    observePages();
                     if (window.Android && window.Android.onDocumentLoaded) {
                         window.Android.onDocumentLoaded(totalPages);
                     }
@@ -330,19 +394,6 @@
             }
         }
 
-        window.addEventListener('DOMContentLoaded', function() {
-            if (window.Android && window.Android.getDocxBase64) {
-                try {
-                    const b64 = window.Android.getDocxBase64();
-                    if (b64 && b64.length > 0) {
-                        const isDark = document.body.classList.contains('dark') || false;
-                        loadDocx(b64, isDark);
-                    }
-                } catch (e) {
-                    console.log("Waiting for evaluateJavascript call");
-                }
-            }
-        });
     </script>
 </body>
 </html>
