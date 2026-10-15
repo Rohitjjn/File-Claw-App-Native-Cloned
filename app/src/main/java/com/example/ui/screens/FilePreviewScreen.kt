@@ -420,12 +420,15 @@ fun FilePreviewScreen(
                         }
 
                         val activeExtension = activeFile?.extension?.lowercase().orEmpty()
+                        // TXT/Markdown keep the established reader chrome: avoid duplicating
+                        // the lower floating controls with the newer upper utility actions.
+                        val isPlainDocument = activeExtension in setOf("txt", "md")
                         val isTextState = fileState is MainViewModel.FileContentState.TextSuccess ||
                             activeExtension in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
                         val canCustomizeAppearance = activeExtension in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql")
                         val canShowOutline = activeExtension in setOf("md", "pdf", "docx")
                         val canUseImmersive = activeExtension in setOf("pdf", "docx", "txt", "md", "png", "jpg", "jpeg", "webp", "gif", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
-                        if (isTextState) {
+                        if (isTextState && !isPlainDocument) {
                             IconButton(onClick = {
                                 val textToCopy = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
                                     ?: runCatching { activeFile?.let { java.io.File(it.path).readText() } }.getOrNull()
@@ -444,7 +447,7 @@ fun FilePreviewScreen(
                             }
                         }
 
-                        if (canCustomizeAppearance) {
+                        if (canCustomizeAppearance && !isPlainDocument) {
                             IconButton(onClick = { isWebRenderActive = !isWebRenderActive }) {
                                 Icon(
                                     imageVector = if (isWebRenderActive) Icons.Outlined.Code else Icons.Outlined.Language,
@@ -459,7 +462,7 @@ fun FilePreviewScreen(
                                 Icon(Icons.Default.Settings, contentDescription = "Appearance")
                             }
                         }
-                        if (canShowOutline) {
+                        if (canShowOutline && !isPlainDocument) {
                             IconButton(onClick = { showOutlineSheet = true }) {
                                 Icon(Icons.Default.MenuBook, contentDescription = "Document outline")
                             }
@@ -1152,6 +1155,8 @@ fun FilePreviewScreen(
                                     showLineNumbers = settings.showLineNumbers,
                                     scrollToLine = scrollToLineNumber,
                                     onScrollToLineHandled = { scrollToLineNumber = null },
+                                    searchQuery = inViewerSearchQuery,
+                                    selectedMatchIndex = currentMatchIndex,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -1975,7 +1980,9 @@ fun CodePreview(
     scrollToLine: Int? = null,
     onScrollToLineHandled: () -> Unit = {},
     appearanceTheme: String = "Claude Glass",
-    appearanceFontSize: Int? = null
+    appearanceFontSize: Int? = null,
+    searchQuery: String = "",
+    selectedMatchIndex: Int = 0
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -2212,6 +2219,20 @@ fun CodePreview(
                     if (webView.tag != htmlContent) {
                         webView.tag = htmlContent
                         webView.loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
+                    }
+                    val searchStateKey = "${searchQuery}#${selectedMatchIndex}"
+                    if (webView.contentDescription?.toString() != searchStateKey) {
+                        webView.contentDescription = searchStateKey
+                        if (searchQuery.length >= 2) {
+                            val queryJson = org.json.JSONObject.quote(searchQuery)
+                            val targetIndex = selectedMatchIndex.coerceAtLeast(0)
+                            webView.evaluateJavascript(
+                                "(function(){if(window.getSelection)window.getSelection().removeAllRanges(); for(var i=0;i<=${targetIndex};i++){if(!window.find(${queryJson},false,false,true,false,false,false))break;}})();",
+                                null
+                            )
+                        } else {
+                            webView.evaluateJavascript("if(window.getSelection)window.getSelection().removeAllRanges();", null)
+                        }
                     }
                 }
             )
@@ -3777,6 +3798,8 @@ fun DocxPreviewWebView(
     var isWebViewLoading by remember(base64Docx) { mutableStateOf(true) }
     var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
     var pureKotlinFallback by remember { mutableStateOf<com.example.core.format.DocxExtractor.ExtractedDocx?>(null) }
+    var fitPageEnabled by remember(base64Docx) { mutableStateOf(false) }
+    var zoomPercent by remember(base64Docx) { mutableIntStateOf(100) }
     
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -3799,6 +3822,14 @@ fun DocxPreviewWebView(
     }
 
     Box(modifier = modifier.fillMaxSize().background(if (isNightMode) Color(0xFF151514) else Color(0xFFfaf9f5))) {
+        LaunchedEffect(fitPageEnabled, zoomPercent, webViewRef, isWebViewLoading) {
+            if (webViewRef != null && !isWebViewLoading) {
+                webViewRef?.evaluateJavascript(
+                    "(function(){var o=document.getElementById('output');if(o)o.classList.toggle('fit-page',$fitPageEnabled);var w=document.querySelector('.docx-wrapper');if(w){w.style.zoom='${zoomPercent / 100.0}';w.style.width='${10000 / zoomPercent.coerceAtLeast(25)}%';}})();",
+                    null
+                )
+            }
+        }
         if (pureKotlinFallback != null) {
             // High-fidelity Pure Kotlin Offline Text Viewer Fallback
             val extracted = pureKotlinFallback!!
@@ -3951,6 +3982,28 @@ fun DocxPreviewWebView(
                 modifier = Modifier.fillMaxSize()
             )
 
+            if (!isWebViewLoading && pureKotlinFallback == null) {
+                Surface(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = if (isNightMode) Color(0xE6252525) else Color(0xEFFFFFFF),
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                ) {
+                    Row(modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { zoomPercent = (zoomPercent - 10).coerceAtLeast(25); fitPageEnabled = false }, modifier = Modifier.size(34.dp)) {
+                            Text("−", fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                        Text("${zoomPercent}%", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(horizontal = 2.dp))
+                        IconButton(onClick = { zoomPercent = (zoomPercent + 10).coerceAtMost(200); fitPageEnabled = false }, modifier = Modifier.size(34.dp)) {
+                            Text("+", fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                        IconButton(onClick = { fitPageEnabled = !fitPageEnabled; zoomPercent = 100 }, modifier = Modifier.size(34.dp)) {
+                            Icon(Icons.Default.Fullscreen, contentDescription = if (fitPageEnabled) "Disable fit page" else "Fit page", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
             if (isWebViewLoading) {
                 Box(
                     modifier = Modifier

@@ -41,18 +41,42 @@
         }
         .docx {
             margin: 0 auto !important;
-            max-width: none;
+            max-width: 100%;
+            box-sizing: border-box;
             box-shadow: 0 4px 16px rgba(0,0,0,0.08) !important;
             border-radius: 8px !important;
             transform-origin: top center;
+        }
+        /* Keep Word pages readable when zoomed out and avoid horizontal clipping. */
+        #output.fit-page .docx-wrapper { width: 100% !important; }
+        #output.fit-page .docx {
+            width: min(100%, 816px) !important;
+            min-width: 0 !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+        }
+        #output.fit-page section, #output.fit-page article {
+            max-width: 100% !important;
+            box-sizing: border-box !important;
         }
         body.dark .docx {
             background-color: #1e1e1d !important;
             color: #f5f5f3 !important;
             box-shadow: 0 4px 16px rgba(0,0,0,0.3) !important;
         }
-        body.dark .docx p, body.dark .docx span, body.dark .docx td {
+        body.dark .docx p, body.dark .docx span, body.dark .docx div,
+        body.dark .docx td, body.dark .docx th, body.dark .docx li,
+        body.dark .docx h1, body.dark .docx h2, body.dark .docx h3,
+        body.dark .docx h4, body.dark .docx h5, body.dark .docx h6 {
             color: #e0deda !important;
+        }
+        body.dark .docx table, body.dark .docx td, body.dark .docx th {
+            border-color: #555 !important;
+        }
+        body.dark .docx [style*="background-color: rgb(255, 255, 255)"],
+        body.dark .docx [style*="background-color:#fff"],
+        body.dark .docx [style*="background-color: #fff"] {
+            background-color: #1e1e1d !important;
         }
         .loading-banner {
             display: flex;
@@ -101,6 +125,17 @@
             if (target && typeof target.scrollIntoView === 'function') {
                 target.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
+        };
+
+        // The native WebView can call these functions from its toolbar.
+        // Fit-to-page is reversible and does not mutate document data.
+        window.setDocxFitPage = function(enabled) {
+            var output = document.getElementById('output');
+            if (output) output.classList.toggle('fit-page', !!enabled);
+            if (output) output.scrollLeft = 0;
+        };
+        window.setDocxDarkMode = function(enabled) {
+            document.body.classList.toggle('dark', !!enabled);
         };
 
         function loadDocx(base64, isDark) {
