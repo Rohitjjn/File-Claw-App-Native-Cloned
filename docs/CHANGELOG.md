@@ -64,7 +64,16 @@ User-directed loop, scoped to Markdown (`.md`, `.markdown`) and TXT only (plus t
   `ReaderPageFixtureTest`, ranged `FencedCodeParser` cases; `tools/reader-js-tests` (jsdom).
 
 ### Verification
-- See the Loop 7 verification note below (filled in from the CI runs of this branch).
+- **Measured** in GitHub Actions run `38733371026` (workflow `android-ci.yml`, branch `arena/2afbaf30-file-claw-app-native-cloned`):
+  `testDebugUnitTest` **142 tests, 0 failures, 0 skipped** (includes the new reader tests and the previously
+  non-compiling Loop 6 tests); **Kotlin→jsdom save round trip: 13 documents, 0 failures** — pages built by the real
+  Kotlin/intellij-markdown builder (tables, nested/task lists, fenced + indented code, quotes, raw HTML, link
+  definitions, front matter, setext headings, hard breaks, emoji/RTL, CRLF, mixed and lone-CR line endings, empty
+  TXT) serialize back byte for byte unchanged, and editing one paragraph leaves every other block verbatim;
+  `tools/reader-js-tests` (jsdom, 104 assertions) pass; `assembleDebug` and `assembleRelease` (R8 + lint-vital) succeed.
+- Earlier runs on the branch are part of the record: run 1 compiled all main code but hit a pre-existing test compile
+  error; run 2 exposed the overlapping-hit search bug; run 3's round trip caught mixed line endings being normalised
+  to CRLF on save. All three were fixed before the final run.
 - **Not verified on a device or emulator:** typing/IME behaviour inside the WebView editor, `execCommand`
   formatting results, keyboard insets on API 26–29, CSS zoom with selection handles, print. Use
   `docs/SANITY_CHECKLIST.md` → "Markdown / TXT reader and editor (Loop 7)".

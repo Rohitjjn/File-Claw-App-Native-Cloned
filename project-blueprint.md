@@ -18,7 +18,7 @@ Next Review Date: December 15, 2026
 | Recent Files | Stable | P0 | HomeScreen |
 | Search/Index | Stable | P1 | SearchScreen |
 | File Preview (General) | Stable | P0 | FilePreviewScreen |
-| Text Editor | Stable | P1 | EditorScreen |
+| Text Editor | Stable | P1 | EditorScreen (code/JSON/XML…); Markdown & TXT edit in place in FilePreviewScreen (Loop 7) |
 | Settings | Stable | P2 | SettingsScreen |
 | Theme System | Stable | P2 | Theme / SettingsScreen |
 | Import/Export | Beta | P2 | SettingsScreen / FilePreviewScreen |
@@ -49,7 +49,7 @@ The application utilizes Jetpack Navigation Compose defining a single `NavHost`.
 - **File Preview (`preview/{id}`)**
   - Arguments: `id` (Int, default: -1, queries RecentFileEntity)
   - Parent: Home / All Files / Search
-  - Flow: Inspects file content. Can launch `editor/{id}`.
+  - Flow: Inspects file content. Markdown/TXT become editable in place (same screen, edit tray, confirmations); other text types launch `editor/{id}`.
 - **Editor (`editor/{id}`)**
   - Arguments: `id` (Int, default: -1)
   - Parent: Preview
@@ -109,7 +109,7 @@ The application adheres strictly to Unidirectional Data Flow (UDF).
 
 ## 9. Future Roadmap (6-month horizon)
 1. **[P1] SAF Migration**: Transition from raw `File` paths to `DocumentFile` and Storage Access Framework URIs for strict Android 14+ scoping compliance.
-2. **[P2] Rich Text Editor**: Expand EditorScreen to support Markdown rendering and basic WYSIWYG editing.
+2. **[P2] Rich Text Editor**: ✅ Loop 7 — WYSIWYG Markdown editing in the preview with source-preserving save (see docs/ARCHITECTURE.md). Next: see docs/prompts/LOOP_08_PROMPT.md.
 3. **[P3] Cloud Sync**: OneDrive/Google Drive plugin support.
 4. **[TODO] Architecture Tech Debt**: Split monolithic `MainViewModel` into feature-specific ViewModels (e.g., `PreviewViewModel`, `SettingsViewModel`).
 
