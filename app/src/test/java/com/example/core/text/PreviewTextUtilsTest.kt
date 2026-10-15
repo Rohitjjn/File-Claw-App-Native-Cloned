@@ -7,7 +7,7 @@ import org.junit.Test
 class PreviewTextUtilsTest {
     @Test
     fun findsAllOccurrencesCaseInsensitively() {
-        assertEquals(listOf(0, 10, 19), PreviewTextUtils.findMatchOffsets("Word x WORD and word", "word"))
+        assertEquals(listOf(0, 7, 16), PreviewTextUtils.findMatchOffsets("Word x WORD and word", "word"))
     }
 
     @Test
