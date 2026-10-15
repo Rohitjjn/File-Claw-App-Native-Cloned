@@ -183,12 +183,14 @@ object FilePrintHelper {
         content: String,
         title: String
     ) {
-        val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
+        val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
+        if (printManager == null) {
+            android.widget.Toast.makeText(context, "Printing service is unavailable.", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
         val tempWebView = WebView(context)
-        val escaped = content
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
+        val escaped = escapeHtml(content)
+        val escapedTitle = escapeHtml(title)
 
         val html = """
             <!DOCTYPE html>
@@ -225,7 +227,7 @@ object FilePrintHelper {
                 </style>
             </head>
             <body>
-                <h2>$title</h2>
+                <h2>$escapedTitle</h2>
                 <hr>
                 <pre>$escaped</pre>
             </body>
@@ -234,19 +236,70 @@ object FilePrintHelper {
 
         tempWebView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
-                val printAdapter = tempWebView.createPrintDocumentAdapter(title)
-                printManager.print(
-                    title,
-                    printAdapter,
-                    PrintAttributes.Builder()
-                        .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
-                        .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
-                        .build()
-                )
+                // Keep the WebView alive until Android's print adapter finishes; otherwise
+                // destroying it immediately can truncate the job on some print services.
+                try {
+                    val printAdapter = tempWebView.createPrintDocumentAdapter(title)
+                    val disposed = java.util.concurrent.atomic.AtomicBoolean(false)
+                    fun disposeWebView() {
+                        if (disposed.compareAndSet(false, true)) {
+                            tempWebView.stopLoading()
+                            tempWebView.destroy()
+                        }
+                    }
+                    val lifecycleAdapter = object : PrintDocumentAdapter() {
+                        override fun onStart() = printAdapter.onStart()
+
+                        override fun onLayout(
+                            oldAttributes: PrintAttributes?,
+                            newAttributes: PrintAttributes,
+                            cancellationSignal: CancellationSignal,
+                            callback: LayoutResultCallback,
+                            extras: Bundle?
+                        ) = printAdapter.onLayout(oldAttributes, newAttributes, cancellationSignal, callback, extras)
+
+                        override fun onWrite(
+                            pages: Array<out PageRange>,
+                            destination: ParcelFileDescriptor,
+                            cancellationSignal: CancellationSignal,
+                            callback: WriteResultCallback
+                        ) = printAdapter.onWrite(pages, destination, cancellationSignal, callback)
+
+                        override fun onFinish() {
+                            try {
+                                printAdapter.onFinish()
+                            } finally {
+                                disposeWebView()
+                            }
+                        }
+                    }
+                    printManager.print(
+                        title,
+                        lifecycleAdapter,
+                        PrintAttributes.Builder()
+                            .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                            .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
+                            .build()
+                    )
+                } catch (e: Exception) {
+                    tempWebView.destroy()
+                    android.widget.Toast.makeText(
+                        context,
+                        "Unable to start print job: ${e.localizedMessage ?: "unknown error"}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }
         tempWebView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
     }
+
+    private fun escapeHtml(value: String): String = value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;")
 
     fun printImage(
         context: Context,
