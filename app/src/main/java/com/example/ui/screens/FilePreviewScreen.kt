@@ -521,13 +521,23 @@ fun FilePreviewScreen(
                                         showMenu = false
                                         activeFile?.let { entity ->
                                             val ext = entity.extension.lowercase()
-                                            if (ext in setOf("png", "jpg", "jpeg", "webp", "gif")) {
-                                                com.example.utils.FilePrintHelper.printImage(context, java.io.File(entity.path), entity.name)
-                                            } else {
-                                                val content = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
-                                                    ?: runCatching { java.io.File(entity.path).readText() }.getOrNull()
-                                                    ?: ""
-                                                com.example.utils.FilePrintHelper.printTextOrMarkdown(context, content, entity.name)
+                                            when (ext) {
+                                                "pdf" -> com.example.utils.FilePrintHelper.printPdf(context, java.io.File(entity.path), entity.name)
+                                                "docx" -> docxWebView?.let { webView ->
+                                                    com.example.utils.FilePrintHelper.printWebView(context, webView, entity.name)
+                                                } ?: android.widget.Toast.makeText(context, "Document is still rendering. Try again in a moment.", android.widget.Toast.LENGTH_SHORT).show()
+                                                "png", "jpg", "jpeg", "webp", "gif" ->
+                                                    com.example.utils.FilePrintHelper.printImage(context, java.io.File(entity.path), entity.name)
+                                                "txt", "md" -> {
+                                                    val content = (fileState as? MainViewModel.FileContentState.TextSuccess)?.content
+                                                        ?: runCatching { java.io.File(entity.path).readText() }.getOrNull()
+                                                    if (content != null) {
+                                                        com.example.utils.FilePrintHelper.printTextOrMarkdown(context, content, entity.name)
+                                                    } else {
+                                                        android.widget.Toast.makeText(context, "Could not read this document for printing.", android.widget.Toast.LENGTH_LONG).show()
+                                                    }
+                                                }
+                                                else -> android.widget.Toast.makeText(context, "Print is supported for PDF, DOCX, TXT and Markdown previews.", android.widget.Toast.LENGTH_SHORT).show()
                                             }
                                         }
                                     },
@@ -1154,6 +1164,7 @@ fun FilePreviewScreen(
                             currentPdfPage = page
                             totalPdfPages = total
                         },
+                        onWebViewReady = { webView -> docxWebView = webView },
                         scrollToPage = scrollToPage,
                         onScrollProgressHandled = { scrollToPage = null },
                         scrollToHeadingIndex = docxOutlineJumpIndex,
@@ -3654,6 +3665,7 @@ fun DocxPreviewWebView(
     viewModel: MainViewModel,
     modifier: Modifier = Modifier,
     onPageChanged: (Int, Int) -> Unit = { _, _ -> },
+    onWebViewReady: (android.webkit.WebView) -> Unit = {},
     scrollToPage: Int? = null,
     onScrollProgressHandled: () -> Unit = {},
     scrollToHeadingIndex: Int? = null,
@@ -3731,6 +3743,7 @@ fun DocxPreviewWebView(
                 factory = { ctx ->
                     android.webkit.WebView(ctx).apply {
                         webViewRef = this
+                    onWebViewReady(this)
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
@@ -3813,6 +3826,7 @@ fun DocxPreviewWebView(
                     }
                 },
                 update = { webView ->
+                    onWebViewReady(webView)
                     // Keep appearance changes in sync without rebuilding the document.
                     webView.evaluateJavascript(
                         "document.body.classList.toggle('dark', $isNightMode); " +
