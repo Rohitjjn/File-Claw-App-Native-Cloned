@@ -1152,6 +1152,8 @@ fun FilePreviewScreen(
                                     showLineNumbers = settings.showLineNumbers,
                                     scrollToLine = scrollToLineNumber,
                                     onScrollToLineHandled = { scrollToLineNumber = null },
+                                    searchQuery = inViewerSearchQuery,
+                                    selectedMatchIndex = currentMatchIndex,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -1975,7 +1977,9 @@ fun CodePreview(
     scrollToLine: Int? = null,
     onScrollToLineHandled: () -> Unit = {},
     appearanceTheme: String = "Claude Glass",
-    appearanceFontSize: Int? = null
+    appearanceFontSize: Int? = null,
+    searchQuery: String = "",
+    selectedMatchIndex: Int = 0
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -2212,6 +2216,20 @@ fun CodePreview(
                     if (webView.tag != htmlContent) {
                         webView.tag = htmlContent
                         webView.loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
+                    }
+                    val searchStateKey = "${searchQuery}#${selectedMatchIndex}"
+                    if (webView.contentDescription?.toString() != searchStateKey) {
+                        webView.contentDescription = searchStateKey
+                        if (searchQuery.length >= 2) {
+                            val queryJson = org.json.JSONObject.quote(searchQuery)
+                            val targetIndex = selectedMatchIndex.coerceAtLeast(0)
+                            webView.evaluateJavascript(
+                                "(function(){if(window.getSelection)window.getSelection().removeAllRanges(); for(var i=0;i<=${targetIndex};i++){if(!window.find(${queryJson},false,false,true,false,false,false))break;}})();",
+                                null
+                            )
+                        } else {
+                            webView.evaluateJavascript("if(window.getSelection)window.getSelection().removeAllRanges();", null)
+                        }
                     }
                 }
             )
