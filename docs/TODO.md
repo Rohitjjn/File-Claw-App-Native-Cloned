@@ -1,3 +1,17 @@
+## Loop 8 — Four-format document preview polish (in progress)
+
+- [ ] Full-document search and next/previous navigation for PDF, DOCX, TXT and MD, with real result mapping/highlighting.
+- [ ] Restore the TXT/MD preview UI from the verified two-loops-earlier revision.
+- [ ] Copy individual fenced code blocks in MD and TXT (inner content only).
+- [ ] Correct print/export routing for PDF, DOCX, TXT and MD.
+- [ ] Verify immersive focus mode fills the screen without a black status-bar strip.
+- [ ] Verify DOCX fit-to-width/fit-page, zoom-out and live dark-mode styling.
+- [ ] Replace PDF dark-mode reflection hack with supported renderer behavior where feasible.
+- [ ] Add regression tests and complete Android CI plus real-device smoke checks.
+- [x] Add numbered Loop 8 and Loop 9 prompt files under `docs/loops/`.
+
+Status note: this list is intentionally not marked complete until implementation, automated verification, CI, and manual-device evidence are available.
+
 # Backlog and known issues
 
 Priorities: **P0** data loss / crash / security · **P1** high-impact feature or correctness · **P2** quality · **P3** polish.
