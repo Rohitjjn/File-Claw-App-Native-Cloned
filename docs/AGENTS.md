@@ -48,5 +48,21 @@ kotlinc + tools/GenFormatDocs.kt                # regenerate the format matrix
 11. DOCX needs file access only to load bundled `android_asset/editor/` resources; cross-file and content access are disabled, and non-editor top-level navigation is blocked. PDF.js uses its own local asset path and the exact PDF file path.
 12. Current work is scoped only to PDF, DOCX, TXT, and Markdown. The next prompt remains within those four formats.
 
+## Loop 7 decisions (Markdown / TXT, user-directed)
+13. Markdown and TXT are edited **in place on the preview screen**; the separate editor screen remains for other text types. Edit mode reuses the preview page, so it looks the same (no line numbers).
+14. Markdown editing is WYSIWYG with **source-preserving save**: each rendered top-level block carries `data-b/data-s/data-e`; untouched blocks are written back from the original source byte for byte and only edited/new blocks are converted to Markdown (`assets/reader/reader.js`). Front matter and raw HTML blocks are non-editable islands. A Markdown source mode is available from the edit menu.
+15. Line endings are restored line by line: unchanged lines keep their exact terminator, changed lines use the file's dominant one.
+16. Undo/redo is a snapshot history in the page (max 100 steps / ~12M chars, original always kept). It is not the browser's native undo stack; formatting uses `execCommand`.
+17. Drafts survive activity recreation via `MainViewModel.inlineEditDraft` (memory only). Process-death recovery is a Loop 8 item.
+18. Viewer appearance is one global setting for MD and TXT (SharedPreferences `reader_appearance`), applied with CSS variables and CSS `zoom` (25–500 %).
+19. System bar icon colour follows the app theme (`isAppInDarkTheme`), not the phone's night mode.
+
+## Loop 7 environment lessons
+- Still no Java/Android SDK in the sandbox. **GitHub Actions is the compiler**: push to the `arena/**` branch and `.github/workflows/android-ci.yml` runs jsdom tests, unit tests, the Kotlin→jsdom save round trip and debug/release assembly. Workflow-file pushes were accepted with the provided token.
+- Job logs live on `results-receiver.actions.githubusercontent.com`, which the sandbox cannot reach. The workflow therefore turns Kotlin errors (`e: ...`), Gradle "What went wrong" lines, failed tests (from JUnit XML) and round-trip failures into `::error::` annotations; read them with `gh api repos/<owner>/<repo>/check-runs/<job-id>/annotations`.
+- The first CI run exposed two pre-existing Loop 6 test problems (a compile error and a failing overlap assertion) that had kept the unit-test suite from ever running; both were fixed.
+- jsdom (npm) works in the sandbox for DOM-level tests; it has no `execCommand`, `caretRangeFromPoint`, layout or IME, so those paths still need a device.
+- Icon availability was checked against the Compose 1.6 icon list (`androidx/androidx` at commit `7b4652f`, `compose/material/material/icons/generator`), since Maven Google is unreachable.
+
 ## Release checklist
 Version bump (`app/build.gradle.kts`) · CHANGELOG · TODO/ROADMAP · regenerate FILE_FORMATS · SANITY_CHECKLIST run · zip + `PATCH_NOTES.md` · next-loop prompt.

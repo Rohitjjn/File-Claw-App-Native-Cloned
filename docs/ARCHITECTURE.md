@@ -57,6 +57,21 @@ no `android.*` imports, unit-tested on the plain JVM. The Android layers are thi
 | Database | SQLite opened read-only, identifiers quoted, only generated SELECTs |
 | Persistence | Room fails fast on schema change without a migration (no silent wipe); backup disabled |
 
+## Markdown / TXT reader and in-place editor (Loop 7)
+- `ui/reader/ReaderHtml.kt` builds one self-contained page per document: `assets/reader/reader.css` + `reader.js` are
+  inlined, the source text is embedded as JSON (`#fc-source`), and appearance is applied as initial CSS variables.
+  Markdown is parsed once with intellij-markdown (GFM) and rendered **per top-level block**, each tagged with
+  `data-b` (index), `data-s`/`data-e` (source range) and `data-k` (kind); headings/paragraphs/list items also carry
+  `data-sp` for navigation. TXT is split into plain/code segments with source ranges.
+- `ui/reader/ReaderDocumentView.kt` hosts the WebView. Kotlin → page: `ReaderController` (`window.FC.*`: appearance,
+  search, scrollToLine/Heading, `editor.enter/exit/undo/redo/tab/bold/italic/command/jump/requestContent`).
+  Page → Kotlin: `window.FCBridge` (`ReaderBridge`): ready, search counts, taps, links, copy, editor state JSON,
+  content for save, debounced draft, scroll ratio.
+- Editing makes the same page `contenteditable` (rich Markdown) or swaps in a plain-text editor (TXT / Markdown source).
+  Save rebuilds the source: untouched blocks verbatim from `#fc-source`, edited/new blocks converted DOM → Markdown,
+  original line endings restored. `MainViewModel.InlineEditSession` holds the session (and a draft) so it survives
+  activity recreation; `FilePreviewScreen` owns the tray, top bar, sheets and confirmations.
+
 ## Known structural debt (see TODO.md)
 `FilePreviewScreen.kt` is now roughly 4,100 lines after the Loop 6 readers; navigation is route-without-arguments backed by one shared
 ViewModel state; imported copies don't write back to the source URI; DOCX/WebView renderers pass whole documents

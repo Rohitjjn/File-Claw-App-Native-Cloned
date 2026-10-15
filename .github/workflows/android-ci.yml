@@ -86,6 +86,25 @@ jobs:
           set -o pipefail
           ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace --no-daemon 2>&1 | tee gradle-build.log
 
+      - name: Summarise results
+        if: success()
+        run: |
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+          tests = failures = errors = skipped = 0
+          for path in glob.glob("app/build/test-results/testDebugUnitTest/*.xml"):
+              root = ET.parse(path).getroot()
+              tests += int(root.get("tests", 0)); failures += int(root.get("failures", 0))
+              errors += int(root.get("errors", 0)); skipped += int(root.get("skipped", 0))
+          print("::notice title=Unit tests::%d tests, %d failures, %d errors, %d skipped" % (tests, failures, errors, skipped))
+          try:
+              last = [l.strip() for l in open("roundtrip.log") if l.startswith("round trip")][-1]
+              print("::notice title=Save round trip::" + last)
+          except (OSError, IndexError):
+              pass
+          PY
+
       - name: Report failures as annotations
         if: failure()
         run: |

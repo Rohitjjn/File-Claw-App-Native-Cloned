@@ -1,0 +1,26 @@
+Files Claw Backup - Loop 7 (Markdown & TXT)
+Date: October 15, 2026
+Author: Arena Agent Mode (single agent; model identifier not exposed)
+
+--- RESTORE POINT (logical backup via Git) ---
+State before this loop: commit da4c3049386c4fd539f20acae3ed2c4d71aeeff9 on main
+(merge of PR #24, release v10.0.2). Restore with:
+    git checkout da4c3049386c4fd539f20acae3ed2c4d71aeeff9
+A zip of the full source was not committed: assets alone are several MB and the repo history
+already preserves every byte (rules.md section 2 allows a Git-based logical backup).
+
+--- COMPLETED IN THIS LOOP (branch arena/2afbaf30-file-claw-app-native-cloned) ---
+1. Status/navigation bar icons follow the app theme (Light app on dark-mode phone fixed).
+2. Markdown/TXT top bar: back, file name, 3-dot only; Focus mode in the menu.
+3. Document outline, Viewer appearance, Go to line and in-document search work for MD/TXT.
+4. In-place editing on the same screen: rich Markdown with source-preserving save, plain TXT,
+   edit tray Undo/Redo/Tab/Bold/Italic/Save/History, X discard confirmation, save confirmation,
+   edit tools menu, edit history sheet, draft survives rotation.
+5. Viewer appearance: zoom 25-500 %, page themes, typeface, text size, spacing, margins, width,
+   justify, wrapping (live, persisted).
+6. CI workflow (no release), jsdom tests, Kotlin unit tests, Kotlin->jsdom save round trip.
+7. Next-loop prompt: docs/prompts/LOOP_08_PROMPT.md.
+
+--- NOT VERIFIED ---
+Device/emulator behaviour (IME typing in the WebView editor, keyboard insets, CSS zoom with
+selection handles, printing). See docs/SANITY_CHECKLIST.md.

@@ -15,9 +15,12 @@ Full support matrix: `FILE_FORMATS.md` (generated from the code).
 - Scope: PDF, DOCX, TXT, and Markdown only. The working branch adds offline PDF.js reader/search/print, DOCX search/theme/zoom/print improvements, TXT/Markdown fenced-code copy, whole-file text search with bounded excerpts, and print/export wiring for all four formats.
 - Static JavaScript and whitespace checks passed; Android compilation, unit tests, emulator/device checks, and actual print/export were not available in the authoring sandbox. See `TODO.md` → KNOWN ISSUES and the Unreleased changelog entry.
 
-## Proposed next loop (Loop 7)
-- Keep the same four-format scope. Priorities: true paged/virtualized TXT/Markdown reading beyond the initial window; Markdown syntax context across page boundaries; navigation beyond the 10,000 retained large-file search offsets; DOCX search across styled text runs; and device verification of PDF/DOCX/TXT/Markdown printing, dark mode, zoom, and immersive mode.
-- Prompt: `docs/prompts/LOOP_07_PROMPT.md`.
+## Loop 7 (done in CI, device verification pending): Markdown & TXT
+- User-directed: status bar icons follow the app theme; minimal MD/TXT top bar; working Document outline, Viewer appearance (zoom 25–500 %, themes, typeface, spacing) and search; in-place WYSIWYG/plain editing with source-preserving save, edit tray, history, confirmations. See CHANGELOG "Loop 7".
+
+## Proposed next loop (Loop 8)
+- Markdown & TXT only. First fix every bug the user reports after testing Loop 7, then pick from the role-based brainstorm (disk drafts + recovery, external-change detection, smart lists and Markdown input rules, find & replace while editing, reading position memory, scroll-spy outline, accessibility and performance work).
+- Prompt: `docs/prompts/LOOP_08_PROMPT.md`. Remaining PDF/DOCX and large-file paging items stay in `TODO.md`.
 
 ## Format highlights
 | Area | ✅ done | 🔄 partial | ⏳ planned |

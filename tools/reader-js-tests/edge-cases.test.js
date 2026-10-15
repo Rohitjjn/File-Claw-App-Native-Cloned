@@ -87,4 +87,9 @@ eq(one('<div class="code-block-container" data-k="code"><div class="code-header"
   p.root.appendChild(np);
   eq(p.FC.editor.serialize(), 'One\r\n\r\nTwo\n\nThree\r\n\r\nNew\r\n', 'new block uses CRLF, old gaps verbatim');
 }
+// A code block the browser split into two <pre> elements still serializes every line
+{
+  const out = one('<div class="code-block-container" data-k="code"><div class="code-header" contenteditable="false"><span class="code-lang">py</span><button class="copy-btn">Copy code</button></div><div class="code-content"><pre><code class="language-py">a = 1\n</code></pre><pre><code>b = 2\n</code></pre></div></div>');
+  eq(out, '```py\na = 1\nb = 2\n```\n', 'split code block');
+}
 done();

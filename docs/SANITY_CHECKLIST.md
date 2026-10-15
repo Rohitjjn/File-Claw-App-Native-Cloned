@@ -22,6 +22,24 @@ Mark each with ✅ / ❌ + notes. Items marked ★ are regressions fixed in 1.1.
 - [ ] Kill the app during a save of a large file (adb `am force-stop`): original file is intact.
 - [ ] A file opened from another app: save shows "Saved to the in-app copy" and the original is unchanged.
 
+## Markdown / TXT reader and editor (Loop 7) — needs a real device
+Use one `.md` (headings, lists, checklist, table, code block, link, front matter) and one `.txt` (CRLF line endings, a fenced block).
+- [ ] App theme Light while the phone is in dark mode (and the reverse): status-bar and navigation-bar icons readable on Home, Preview and Settings; also in focus mode with Sepia/Black page themes.
+- [ ] Top bar for MD/TXT shows only ←, file name, ⋮. Bottom tray unchanged (search, line no., print, copy, edit, share).
+- [ ] Search: tap the tray icon → bar appears below the top bar with keyboard; typing highlights; ↑/↓ and keyboard Enter step through matches; ✕ clears.
+- [ ] ⋮ → Document outline: lists headings (MD) / sections (TXT); tapping scrolls and flashes the heading. Filter field appears for long outlines.
+- [ ] ⋮ → Viewer appearance: zoom 25 % and 500 % (slider, −/+ and presets), page themes, typeface, text size, line spacing, margins, line width, justify, wrap — each applies instantly, keeps the reading position, and persists after reopening the app.
+- [ ] Line no. dialog jumps to the line (MD and TXT) and flashes it. ⋮ → Focus mode hides bars; the floating ← / exit pill is visible.
+- [ ] Edit (tray): same screen becomes editable, looks identical, no line numbers. Tray becomes Undo · Redo · Tab · B · I · Save · History and sits above the keyboard; caret stays visible while typing at the bottom.
+- [ ] Gboard: type words with autocorrect/suggestions, delete, select text then Bold/Italic, Enter inside a list and inside a code block, paste multi-line text. No lost characters, no duplicated words.
+- [ ] Undo/Redo step through typing bursts and formatting; History sheet shows readable steps and jumps back/forward; "Go back to the original" restores the file text.
+- [ ] ⋮ while editing: headings, lists, checklist (tap box toggles), quote, code block, inline code, link dialog, divider, strike, indent/outdent, clear, Markdown source mode and back, select all, save a copy, discard.
+- [ ] X / Back with no changes leaves edit mode directly; with changes asks "Discard changes?" and Keep editing works.
+- [ ] Save shows the confirmation with +/− lines and words; after Save the preview shows the new text at the same scroll position. Reopen the file: content saved, untouched parts byte-identical (compare with a desktop diff), CRLF/BOM preserved.
+- [ ] Rotate while editing with unsaved changes: still in edit mode with the changes. Switch app theme while editing: same.
+- [ ] Settings → Edit on open: opening an `.md`/`.txt` lands directly in in-place editing; a truncated large file stays read-only with its banner.
+- [ ] Release build (minified) behaves the same (JS bridge calls work: search counts, outline jumps, editor state, save).
+
 ## Archives
 - [ ] ZIP with 100k entries opens without ANR. Zip bomb sample is refused with a message, no crash/OOM.
 - [ ] Entry named `../../x` is shown flagged and cannot be extracted.

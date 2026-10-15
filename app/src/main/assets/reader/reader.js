@@ -962,7 +962,9 @@
     if (text == null) return;
     e.preventDefault();
     flushTyping();
-    if (!execCommand('insertText', text)) insertTextAtCaret(text);
+    // Inside a code block keep the text raw: the browser may otherwise split the <pre> on newlines.
+    var inCode = editor.mode === 'rich' && closestEl(currentNode(), 'pre', editor.host);
+    if (inCode || !execCommand('insertText', text)) insertTextAtCaret(text.replace(/\r\n?/g, '\n'));
     commit('Pasted \u201c' + clip(text) + '\u201d');
   }
 
@@ -1652,7 +1654,20 @@
     var codeEl = pre ? (pre.querySelector('code') || pre) : (el.querySelector('code') || el);
     var match = (codeEl.className || '').match(/language-([\w+#.-]+)/);
     var lang = match ? match[1] : (container ? (container.getAttribute('data-lang') || '') : '');
-    var text = codeTextOf(codeEl).replace(/\n$/, '');
+    var text;
+    if (container) {
+      // Read every part of the body in case the browser split it into several <pre>/<div> blocks.
+      var body = container.querySelector('.code-content') || container;
+      var pieces = toArray(body.childNodes).map(function (n) {
+        if (n.nodeType === 3) return n.nodeValue;
+        if (n.nodeType !== 1) return '';
+        return codeTextOf(n.nodeName === 'PRE' ? (n.querySelector('code') || n) : n);
+      }).filter(function (t) { return t.length; });
+      text = pieces.map(function (t, i) { return i < pieces.length - 1 ? t.replace(/\n?$/, '\n') : t; }).join('');
+    } else {
+      text = codeTextOf(codeEl);
+    }
+    text = text.replace(/\n$/, '');
     var longest = 2, m, re = /`{3,}/g;
     while ((m = re.exec(text))) longest = Math.max(longest, m[0].length);
     var fence = new Array(longest + 2).join('`');

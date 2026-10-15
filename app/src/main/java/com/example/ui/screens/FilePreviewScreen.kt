@@ -267,7 +267,6 @@ fun FilePreviewScreen(
     val editSession = inlineEditSession?.takeIf { isReaderDoc && it.path == activeFile?.path }
     val isInlineEditing = editSession != null
     val readerEditorState = readerController.editorState
-    var showEditMenu by remember { mutableStateOf(false) }
     var showHistorySheet by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
     var showDiscardDialog by remember { mutableStateOf(false) }

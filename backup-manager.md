@@ -91,3 +91,4 @@ Next Review Date: December 15, 2026
 - 2026-06-15: v1.0 - Initial document creation.
 - 2026-06-16: v1.1 - Added indices and WAL configuration, updated backup history logging for v1.0.1 hotfix.
 - 2026-06-17: v1.2 - Replaced native Markdown renderer with WebView (Claude styling), logged as v1.0.2 backup.
+- 2026-10-15: v1.3 - Loop 7 (Markdown/TXT in-place editing): logical Git backup recorded in `backup/loop-07_2026-10-15_info.txt` (restore point `da4c304`).

@@ -1,5 +1,5 @@
 # File Claw - Changelog
-Last Updated: June 15, 2026
+Last Updated: October 15, 2026
 Document Version: 1.0
 Next Review Date: December 15, 2026
 
@@ -30,6 +30,25 @@ Next Review Date: December 15, 2026
 - See `known-issues.md` regarding PDF scale resetting on orientation change.
 
 ## 4. Version History
+
+### [Loop 7] - Markdown & TXT in-place editing and reader fixes (2026-10-15)
+Not a release (no version bump); verified in GitHub Actions CI, not yet on a device. Full detail: `docs/CHANGELOG.md`.
+**[FIXED]**
+- **Affected:** `MainActivity.kt`, `ui/theme/Theme.kt`, `FilePreviewScreen.kt`
+- **Description:** Status/navigation bar icons follow the app theme, so they are visible in Light mode on a phone set to dark mode.
+- **Affected:** `FilePreviewScreen.kt`, `ui/component/DocumentOutlineBottomSheet.kt`, `ui/reader/*`
+- **Description:** Document outline, Viewer appearance, Go to line and in-document search now work for Markdown/TXT (sheets were never rendered; the search bar was hidden under the WebView).
+- **Affected:** `core/text/TextFileSearchEngine.kt`, `TextFileSearchEngineTest.kt`
+- **Description:** Large-file search no longer double-counts overlapping hits; pre-existing test compile error fixed.
+**[CHANGED]**
+- **Affected:** `FilePreviewScreen.kt`, `ui/component/ClaudeComponents.kt`
+- **Description:** Markdown/TXT top bar shows only back, file name and the 3-dot menu (Focus mode moved into the menu).
+**[ADDED]**
+- **Affected:** `assets/reader/reader.js`, `assets/reader/reader.css`, `ui/reader/*`, `MainViewModel.kt`, `FilePreviewScreen.kt`
+- **Description:** In-place editing on the preview screen (rich Markdown with source-preserving save, plain TXT), edit tray (Undo/Redo/Tab/Bold/Italic/Save/History), discard and save confirmations, edit tools menu, edit history; Viewer appearance with 25–500 % zoom, page themes, typeface, size, spacing, margins, width, justify, wrapping.
+- **Affected:** `.github/workflows/android-ci.yml`, `tools/reader-js-tests/`, `app/src/test/java/com/example/ui/reader/*`
+- **Description:** CI (no release) with jsdom, unit tests, a Kotlin→jsdom save round trip and debug/release assembly.
+
 
 ### [v1.0.4] - Sidebar, Auto-Encoding & Large PDF Fixes (2026-06-28)
 **[ADDED]**
