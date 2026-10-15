@@ -3801,7 +3801,14 @@ fun DocxPreviewWebView(
                     }
                 },
                 update = { webView ->
-                    // No-op
+                    // Keep appearance changes in sync without rebuilding the document.
+                    webView.evaluateJavascript(
+                        "document.body.classList.toggle('dark', $isNightMode); " +
+                            "document.querySelectorAll('.docx').forEach(function(page) { " +
+                            "page.style.backgroundColor = " + (if (isNightMode) "'#1e1e1d'" else "'#ffffff'") + "; " +
+                            "page.style.color = " + (if (isNightMode) "'#f5f5f3'" else "'#141413'") + "; });",
+                        null
+                    )
                 },
                 modifier = Modifier.fillMaxSize()
             )
