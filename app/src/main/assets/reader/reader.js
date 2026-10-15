@@ -638,8 +638,8 @@
       var topOffset = sourceOffsetAtTop();
       editor.previewHtml = r.innerHTML;
       var text = source();
-      editor.crlf = text.indexOf('\r\n') >= 0;
-      var normalized = editor.crlf ? text.replace(/\r\n/g, '\n') : text;
+      editor.crlf = text.indexOf('\r') >= 0;
+      var normalized = editor.crlf ? text.replace(/\r\n?/g, '\n') : text;
       var host = D.createElement('div');
       host.className = 'fc-plain-editor';
       host.setAttribute('contenteditable', supportsPlaintextOnly() ? 'plaintext-only' : 'true');
@@ -1290,6 +1290,46 @@
     return true;
   }
 
+  // ------------------------------------------------------------------ line endings
+
+  /** The file's dominant line ending; new or changed lines are written with it. */
+  function dominantEol(text) {
+    var crlf = (text.match(/\r\n/g) || []).length;
+    var lf = (text.match(/\n/g) || []).length - crlf;
+    return crlf > lf ? '\r\n' : '\n';
+  }
+
+  function splitLinesKeepEnds(text) {
+    var out = [], re = /\r\n|\n|\r/g, last = 0, m;
+    while ((m = re.exec(text))) { out.push({ t: text.slice(last, m.index), e: m[0] }); last = re.lastIndex; }
+    out.push({ t: text.slice(last), e: '' });
+    return out;
+  }
+
+  /**
+   * Re-applies the original line endings to text edited with plain \n: unchanged leading and trailing
+   * lines keep exactly the terminator they had (so mixed-ending files survive), changed lines use the
+   * dominant one.
+   */
+  function restoreLineEndings(original, edited) {
+    if (!/\r/.test(original)) return edited;
+    var a = splitLinesKeepEnds(original), b = edited.split('\n'), eol = dominantEol(original);
+    var p = 0, s = 0;
+    while (p < a.length && p < b.length && a[p].t === b[p]) p++;
+    while (s < a.length - p && s < b.length - p && a[a.length - 1 - s].t === b[b.length - 1 - s]) s++;
+    var out = [];
+    for (var i = 0; i < b.length; i++) {
+      var ending = '';
+      if (i < b.length - 1) {
+        if (i < p) ending = a[i].e || eol;
+        else if (i >= b.length - s) ending = a[a.length - (b.length - i)].e || eol;
+        else ending = eol;
+      }
+      out.push(b[i], ending);
+    }
+    return out.join('');
+  }
+
   // ------------------------------------------------------------------ Markdown serialization
 
   var INLINE_HTML = { SUP: 1, SUB: 1, U: 1, INS: 1, MARK: 1, SMALL: 1, KBD: 1, ABBR: 1, Q: 1, CITE: 1, VAR: 1, SAMP: 1 };
@@ -1716,6 +1756,8 @@
   function serializeRich() {
     removeMarkers();
     var src = source(), n = BLOCKS.length, r = root();
+    var eol = dominantEol(src);
+    function generated(text) { return eol === '\n' ? text : text.replace(/\r?\n/g, eol); }
     var nodes = toArray(r.childNodes);
     var claims = {};
     nodes.forEach(function (node) {
@@ -1733,7 +1775,8 @@
       for (var k = from; k <= to; k++) s += gap(k);
       return collapseBlankLines(s);
     }
-    var out = '', last = -1, prevClean = true, prevInfo = {}, seen = {};
+    var parts = [], length = 0, last = -1, prevClean = true, prevInfo = {}, seen = {};
+    function push(text) { if (text) { parts.push(text); length += text.length; } }
     var orig = editor.orig || { inner: {}, tag: {} };
     nodes.forEach(function (node) {
       var b = node.nodeType === 1 ? intAttr(node, 'data-b', -1) : -1;
@@ -1749,28 +1792,32 @@
         md = mdBlock(node, { avoidBullet: prevInfo.bullet, avoidDelim: prevInfo.delim });
       }
       if (!md) return;
-      var sep = '';
-      if (isOrig) { sep = gaps(last + 1, b); last = b; }
-      if (out.length) {
-        if (!(clean && prevClean)) sep = ensureBlankLine(sep);
+      var sep = '', sepVerbatim = true;
+      if (isOrig) { sep = gaps(last + 1, b); sepVerbatim = last + 1 === b; last = b; }
+      if (length && !(clean && prevClean)) {
+        var fixed = ensureBlankLine(sep);
+        if (fixed !== sep) { sep = fixed; sepVerbatim = false; }
       }
-      out += sep + md;
+      push(sepVerbatim ? sep : generated(sep));
+      push(clean ? md : generated(md));
       prevClean = clean;
       prevInfo = isListEl(node) || (clean && /^\s*([-*+]|\d{1,9}[.)])\s/.test(md)) ? firstMarkerOf(md) : {};
     });
-    var tail = gaps(last + 1, n);
-    if (!/\S/.test(tail) && last < n - 1) tail = /\n$/.test(src) ? '\n' : '';
-    if (out.length && !prevClean && /\S/.test(tail)) tail = ensureBlankLine(tail);
-    out += tail;
-    if (/\n$/.test(src) && !/\n$/.test(out) && out.length) out += '\n';
-    if (src.indexOf('\r\n') >= 0) out = out.replace(/\r?\n/g, '\r\n');
+    var tail = gaps(last + 1, n), tailVerbatim = last + 1 === n;
+    if (!/\S/.test(tail) && last < n - 1) { tail = /\n$/.test(src) ? '\n' : ''; tailVerbatim = false; }
+    if (length && !prevClean && /\S/.test(tail)) {
+      var fixedTail = ensureBlankLine(tail);
+      if (fixedTail !== tail) { tail = fixedTail; tailVerbatim = false; }
+    }
+    push(tailVerbatim ? tail : generated(tail));
+    var out = parts.join('');
+    if (/\n$/.test(src) && !/\n$/.test(out) && out.length) out += eol;
     return out;
   }
 
   function serializePlain() {
     var text = plainTextOf(editor.host);
-    if (editor.crlf) text = text.replace(/\r?\n/g, '\r\n');
-    return text;
+    return editor.crlf ? restoreLineEndings(source(), text) : text;
   }
 
   function serialize() {

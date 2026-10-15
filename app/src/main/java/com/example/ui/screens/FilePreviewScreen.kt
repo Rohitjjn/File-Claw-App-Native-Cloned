@@ -384,13 +384,13 @@ fun FilePreviewScreen(
         }
     }
 
-    val isLargeTextSearchable = activeFile?.extension?.lowercase() in setOf("txt", "md") &&
+    val isLargeTextSearchable = activeFile?.extension?.lowercase() in setOf("txt", "md", "markdown") &&
         (fileState as? MainViewModel.FileContentState.TextSuccess)?.truncated == true
 
     LaunchedEffect(activeFile?.path, fileState) {
         val textState = fileState as? MainViewModel.FileContentState.TextSuccess
         val extension = activeFile?.extension?.lowercase()
-        fullPreviewText = if (textState != null && extension in setOf("txt", "md")) textState.content else null
+        fullPreviewText = if (textState != null && extension in setOf("txt", "md", "markdown")) textState.content else null
     }
 
     LaunchedEffect(activeFile?.path, inViewerSearchQuery, isLargeTextSearchable, fileState) {
@@ -793,7 +793,7 @@ fun FilePreviewScreen(
                                     )
                                 }
 
-                                val isTextFile = activeFile?.extension?.lowercase() in setOf("txt", "md", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
+                                val isTextFile = activeFile?.extension?.lowercase() in setOf("txt", "md", "markdown", "json", "xml", "html", "htm", "js", "ts", "css", "log", "yaml", "yml", "ini", "conf", "sh", "py", "java", "kt", "c", "cpp", "h", "sql", "csv", "tsv")
                                 if (isTextFile) {
                                     DropdownMenuItem(
                                         text = { Text("Viewer Appearance") },
@@ -977,8 +977,10 @@ fun FilePreviewScreen(
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(if (isInlineEditing) 2.dp else 4.dp),
+                                modifier = Modifier
+                                    .then(if (isInlineEditing) Modifier.horizontalScroll(rememberScrollState()) else Modifier)
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
                             ) {
                                 if (isPdf) {
                                     // Page indicator / Jump button
@@ -1386,7 +1388,7 @@ fun FilePreviewScreen(
         containerColor = MaterialTheme.colorScheme.background,
         modifier = modifier.testTag("file_preview_screen")
     ) { innerPadding ->
-        val usesReaderGestures = activeFile?.extension?.lowercase() in setOf("pdf", "doc", "docx", "txt", "md")
+        val usesReaderGestures = activeFile?.extension?.lowercase() in setOf("pdf", "doc", "docx", "txt", "md", "markdown")
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1473,7 +1475,7 @@ fun FilePreviewScreen(
                 is MainViewModel.FileContentState.TextSuccess -> {
                     Column(modifier = Modifier.fillMaxSize()) {
                         val completeContent = fullPreviewText ?: state.content
-                        val supportsFullFileSearch = state.file.extension.lowercase() in setOf("txt", "md")
+                        val supportsFullFileSearch = state.file.extension.lowercase() in setOf("txt", "md", "markdown")
                         val notice = state.readOnlyReason ?: when {
                             state.truncated && supportsFullFileSearch && isFullTextLoading -> "Searching the complete ${formatFileSize(state.totalBytes)} file…"
                             state.truncated && supportsFullFileSearch && largeTextSearchError != null -> "Full-file search failed: ${largeTextSearchError.orEmpty()}"
@@ -1836,7 +1838,7 @@ fun FilePreviewScreen(
                                 isPdfSearch -> pdfSearchSnapshot.matches.size
                                 isLargeTextSearchable -> largeTextSearchMatches.size
                                 extension in setOf("docx", "doc") -> minOf(totalMatchesCount, 5_000)
-                                extension in setOf("txt", "md") -> minOf(totalMatchesCount, 1_000)
+                                extension in setOf("txt", "md", "markdown") -> minOf(totalMatchesCount, 1_000)
                                 else -> totalMatchesCount
                             }
                             val pageInfo = if (isPdfSearch) {

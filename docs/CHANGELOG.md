@@ -4,6 +4,72 @@ Format: [Keep a Changelog](https://keepachangelog.com). Numbers marked **(measur
 run in the build sandbox; **(not verified)** means the change could not be compiled or run there (no Android SDK,
 no Maven access). See `TODO.md` → KNOWN ISSUES.
 
+## [Unreleased] Loop 7 — Markdown & TXT: in-place editing, working outline/appearance/search, status bar
+
+User-directed loop, scoped to Markdown (`.md`, `.markdown`) and TXT only (plus the app-wide status bar fix).
+
+### Fixed
+- **Status/navigation bar icons invisible in Light theme.** `enableEdgeToEdge()` chose icon colours from the
+  phone's night mode, while the app theme defaults to "Light", so a Light app on a dark-mode phone drew white
+  icons on a white bar. `MainActivity` now re-applies edge-to-edge with `SystemBarStyle.auto { appDarkTheme }`
+  whenever the app theme changes (new `isAppInDarkTheme()` in `Theme.kt`). The preview screen picks icon
+  colours from what is actually behind the bars (app background with bars shown, page in focus mode) and
+  restores icons for the *current* theme on exit instead of values captured on entry.
+- **Document outline and Viewer appearance did nothing.** The 3-dot items only set flags that no composable
+  read. Both sheets are now rendered and wired for Markdown/TXT. "Go to line" (bottom tray) was also never
+  consumed; it now scrolls and flashes the line.
+- **In-document search did nothing visible.** The search bar (and the focus-mode pill) were declared before
+  the document `WebView` in the same `Box`, so the WebView was drawn on top of them. Both overlays now render
+  after the content (this also fixes them for PDF/DOCX). The field auto-focuses and Enter jumps to the next match;
+  the extra status-bar gap above the field is gone.
+- Large-file search (`TextFileSearchEngine`) counted overlapping hits again at chunk boundaries; it now
+  resumes after the last match (matches the in-page search). Fixed the failing pre-existing test and a
+  compile error in `TextFileSearchEngineTest` (String passed as ByteArray), which kept the whole unit-test
+  suite from compiling.
+- GFM strikethrough (`~~x~~`) is now drawn struck through; task-list checkboxes are no longer stripped by the
+  sanitizer (shown as styled boxes).
+
+### Changed
+- Markdown/TXT top bar shows only back, file name and the 3-dot menu; Search, Outline, Copy and the focus toggle
+  were duplicates of the bottom tray (Focus mode moved into the 3-dot menu). Other formats are unchanged.
+- Markdown/TXT preview is a new self-contained reader page (`assets/reader/reader.{js,css}`, built by
+  `ui/reader/ReaderHtml.kt`). Markdown is rendered per top-level block with its exact source range; TXT keeps the
+  fenced-code cards. Links ask before opening; `#anchor` links scroll inside the document.
+- Settings → "Edit on open" opens Markdown/TXT straight into in-place editing (other text types keep the editor screen).
+
+### Added
+- **In-place editing on the same screen** (Edit in the bottom tray). The page stays as it looks in preview
+  (no line numbers): rich WYSIWYG editing for Markdown, plain editing for TXT.
+  - Bottom tray becomes Undo · Redo · Tab · Bold · Italic · **Save** · History; it rides above the keyboard.
+  - Top bar: X (discard, with confirmation when there are changes), file name with "Editing / unsaved" subtitle,
+    3-dot menu with editing tools — Markdown: Normal/H1/H2/H3, bullets, numbers, checklist, quote, code block,
+    inline code, link, divider, strikethrough, indent/outdent, clear formatting, "Edit Markdown source",
+    select all, save a copy, discard. TXT/source: insert date & time, UPPER/lower/Title case, indent/outdent
+    lines, trim trailing spaces, tabs to spaces, select all, save a copy, discard.
+  - Save asks for confirmation with a +lines/−lines/word summary; the previous version is still backed up by
+    `saveTextFile`. Back/X ask before discarding. Ctrl+S/Z/Y/B/I work with a hardware keyboard.
+  - **Source-preserving Markdown save:** untouched blocks are written back byte for byte (odd formatting, CRLF,
+    link definitions, front matter, HTML blocks); only edited/new blocks are converted from HTML to Markdown.
+  - **Edit history** sheet: every checkpoint with a description ("Typed “…”", "Deleted “…”", "Bold"…), time and
+    size change; tap any step to go back to it, or back to the original.
+  - Unsaved edits survive activity recreation (rotation, theme change) through a debounced draft in the ViewModel.
+- **Viewer appearance** for Markdown/TXT, applied live without reload and persisted: browser-like zoom 25–500 %
+  (slider, −/+ steps, presets), page theme (Auto/Light/Sepia/Dark/Black), typeface (Default/Sans/Serif/Mono),
+  text size, line spacing, margins, comfortable line width, justify, wrap long lines (TXT) / wrap code (MD).
+- Outline sheet: real Markdown headings from the renderer's parser (front matter and code ignored), conservative
+  TXT section detection, section filter for long outlines.
+- CI workflow `.github/workflows/android-ci.yml` (push to `arena/**`, PRs to `main`; never publishes): jsdom
+  tests for `reader.js`, unit tests, a Kotlin→jsdom Markdown/TXT save round trip, debug + release assembly.
+- Tests: `ReaderHtmlTest`, `ReaderOutlineTest`, `ReaderTextStatsTest`, `ReaderAppearanceTest`,
+  `ReaderPageFixtureTest`, ranged `FencedCodeParser` cases; `tools/reader-js-tests` (jsdom).
+
+### Verification
+- See the Loop 7 verification note below (filled in from the CI runs of this branch).
+- **Not verified on a device or emulator:** typing/IME behaviour inside the WebView editor, `execCommand`
+  formatting results, keyboard insets on API 26–29, CSS zoom with selection handles, print. Use
+  `docs/SANITY_CHECKLIST.md` → "Markdown / TXT reader and editor (Loop 7)".
+- Arena Agent Mode did not expose the underlying model identifier. No multi-agent team ran.
+
 ## [Unreleased] Loop 6 — PDF, DOCX, TXT, Markdown reader improvements
 
 ### Added

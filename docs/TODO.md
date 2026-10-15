@@ -3,7 +3,13 @@
 Priorities: **P0** data loss / crash / security · **P1** high-impact feature or correctness · **P2** quality · **P3** polish.
 
 ## KNOWN ISSUES (read first)
-1. **Loop 6 changes have not been compiled or run on Android.** This sandbox has no `java` or `kotlinc`, `ANDROID_HOME` is unset, and `gradlew` is tracked without its executable bit (`100644`). `./gradlew testDebugUnitTest --no-daemon` was denied by file permissions; `bash gradlew testDebugUnitTest --no-daemon` reached the wrapper and failed because Java is missing. New core tests (`TextFileSearchEngineTest`, tilde-fence cases) and Compose/WebView code were not compiled or run. What *was* verified in this loop: extracted PDF.js, DOCX, and TXT/Markdown JavaScript syntax checks passed under Node 22.22.3; Python lexical delimiter sanity passed for 11 changed/added Kotlin files (not a compiler check); `git diff --check` passed. Earlier 91-test / 98.3% coverage figures are historical and were **not rerun** for this patch. **Run the Quality Gate in `BUILD_GUIDE.md` first.**
+1. **Loop 7 (Markdown/TXT) is compiled and unit-tested in CI, but not run on a device.** The authoring sandbox
+   still has no Java/Android SDK, so verification moved to GitHub Actions: `.github/workflows/android-ci.yml`
+   runs on every push to `arena/**` and on PRs to `main` (jsdom tests for `reader.js`, `testDebugUnitTest`, a
+   Kotlin→jsdom Markdown/TXT save round trip, `assembleDebug` and `assembleRelease`). Results for this loop are
+   in `docs/CHANGELOG.md`. CI cannot exercise typing/IME inside the WebView editor, keyboard insets, CSS zoom
+   with selection handles or printing: run `docs/SANITY_CHECKLIST.md` → "Markdown / TXT reader and editor (Loop 7)".
+   Loop 6 Android code compiled as part of the same build; its device behaviour is still unverified.
 2. Gradle wiring for JaCoCo (`jacocoCoreReport` / `jacocoCoreVerify`), `enableUnitTestCoverage`, detekt, and Room schema export is
    unverified. detekt is `ignoreFailures = true` until its first green run.
 3. Edits to files opened from another app are saved to the in-app copy only (the user is told). Write-back is P1 below.
@@ -43,11 +49,27 @@ Priorities: **P0** data loss / crash / security · **P1** high-impact feature or
 - [x] Focus mode keeps reader canvas under system bars and uses the effective reader theme for system-bar icon contrast; search overlay hides while controls are hidden.
 - [ ] Android compilation, unit tests, device/WebView behavior, actual PrintManager preview/export, DOCX zoom, and immersive-mode restoration: run and record in a Java/Android SDK-enabled environment.
 
+## Loop 7 — Markdown & TXT (done in CI; device verification pending)
+- [x] Status/navigation bar icons follow the app theme (Light app on a dark-mode phone no longer gets white icons on white).
+- [x] Markdown/TXT top bar: back, file name, 3-dot only; Focus mode in the 3-dot menu.
+- [x] Document outline, Viewer appearance and Go to line actually work for Markdown/TXT; search bar is visible (drawn above the WebView), auto-focused, Enter = next.
+- [x] In-place editing on the preview screen (rich Markdown with source-preserving save, plain TXT), edit tray (Undo/Redo/Tab/Bold/Italic/Save/History), X discard confirmation, save confirmation with change summary, edit tools menu, edit history sheet, draft survives recreation.
+- [x] Viewer appearance: zoom 25–500 %, page themes, typeface, size, spacing, margins, width, justify, wrapping; live and persisted.
+- [ ] **Loop 8:** fix what the user reports after testing Loop 7, then the brainstormed improvements in `docs/prompts/LOOP_08_PROMPT.md`.
+- [ ] Device checks in `docs/SANITY_CHECKLIST.md` (IME/Gboard composition, execCommand output, keyboard insets on API 26–29, zoom + selection, print of the rendered theme).
+- [ ] Unsaved edits are lost on **process death** (draft is in memory only); persist drafts to disk with a recovery banner (Loop 8 prompt).
+- [ ] Saving does not detect that the file changed on disk since it was opened.
+- [ ] `saveTextFile` still writes a hidden `.name.bak` next to the user's file; move backups to app storage.
+- [ ] Undo history resets when switching rich ↔ Markdown source mode.
+- [ ] Relative images (`![](img.png)`) and remote images don't load in the reader (no base URL / no INTERNET); decide on a guarded asset loader.
+- [ ] Bottom-tray icons are 36 dp (below the 48 dp touch-target guideline).
+- [ ] Document outline / Viewer appearance menu items still do nothing for PDF/DOCX and other text types (out of Loop 7 scope).
+
 ## P1
 - [ ] **Write-back to source URI** for files opened from other apps (store `sourceUri` on `RecentFileEntity`, Room `Migration(3,4)`, `openOutputStream(uri, "wt")`).
 - [ ] Don't copy 500 MB media imports: stream `content://` directly into ExoPlayer/Coil/PDF viewer.
 - [ ] **Loop 7: continuous paged TXT/Markdown viewer** on `TextWindowReader` for files > 250k characters. Loop 6 adds streaming full-file search and bounded excerpts at selected hits, but not continuous scrolling or Markdown block-context preservation across windows.
-- [ ] Editor: line-number gutter shares scroll state with the text field; undo stack stores full text per keystroke; "Smart indent" strips indentation (destructive for Python/YAML/Makefile).
+- [ ] Editor screen (still used for JSON/XML/code and other text types; Markdown/TXT now edit in place): line-number gutter shares scroll state with the text field; undo stack stores full text per keystroke; "Smart indent" strips indentation (destructive for Python/YAML/Makefile).
 - [ ] Legacy Office: BIFF8 `.xls` reader first, then `.doc` text extraction.
 - [ ] Root-level `GlassBackdrop` + NavHost transition policy; glass sheets/dialogs/search.
 - [ ] Split `FilePreviewScreen.kt` (2,980 lines) into per-viewer files; type-safe navigation instead of shared singleton state.

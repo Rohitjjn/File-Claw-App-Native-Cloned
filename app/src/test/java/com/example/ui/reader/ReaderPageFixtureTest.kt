@@ -22,6 +22,8 @@ class ReaderPageFixtureTest {
         "crlf.md" to "# CRLF doc\r\n\r\nLine one\r\nline two\r\n\r\n- item\r\n- item 2\r\n",
         "edge.md" to "Setext H1\n=========\n\nSetext H2\n---------\n\nHard break with spaces  \nand backslash\\\nend.\n\nEscapes: \\*not italic\\* and 2 * 3 * 4 and snake_case_name.\n\nEmoji \uD83D\uDE00 and unicode \u00e9\u00e8 and RTL \u05e9\u05dc\u05d5\u05dd.\n\nCosts $5 and $10.\n\n\n\nTrailing blank lines above.\n",
         "no-trailing-newline.md" to "Just one paragraph without a final newline",
+        "mixed-eol.md" to "# Mixed\r\n\r\nCRLF paragraph\r\n\nLF paragraph\n\n- a\r\n- b\n",
+        "lone-cr.txt" to "old mac\rline two\rline three",
         "notes.txt" to "Plain notes\n\nfirst line\n\tindented with tab\n```sh\necho \"<x>\"\n```\nafter code\r\nwindows line\n",
         "empty.txt" to ""
     )

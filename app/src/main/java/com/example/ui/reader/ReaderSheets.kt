@@ -586,7 +586,7 @@ fun RowScope.ReaderEditToolbarItems(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
         ) {
             if (saving) {
                 CircularProgressIndicator(

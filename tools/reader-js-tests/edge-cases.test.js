@@ -65,4 +65,26 @@ eq(one('<div class="code-block-container" data-k="code"><div class="code-header"
   ok(p.FC.scrollToLine(2) === true, 'scrollToLine returns true');
   eq(p.d.querySelectorAll('.fc-marker').length, 1, 'flash marker present');
 }
+// Mixed line endings survive an unchanged save, and only edited lines change (plain editor)
+{
+  const src = 'a\nb\r\nc\rd\n';
+  const p = txtPage(src, [{ s: 0, e: src.length }]);
+  p.FC.editor.enter('plain');
+  eq(p.FC.editor.serialize(), src, 'mixed endings untouched');
+  const host = p.root.querySelector('.fc-plain-editor');
+  host.textContent = host.textContent.replace('c', 'C');
+  eq(p.FC.editor.serialize(), 'a\nb\r\nC\nd\n', 'only the edited line takes the dominant ending');
+}
+
+// Mixed line endings in Markdown: verbatim blocks/gaps keep their bytes, generated text uses the dominant one
+{
+  const p = mdPage([{ src: 'One', html: '<p>One</p>' }, { src: 'Two', html: '<p>Two</p>' }, { src: 'Three', html: '<p>Three</p>' }],
+    { seps: ['\r\n\r\n', '\n\n'], tail: '\r\n' });
+  p.FC.editor.enter('rich');
+  eq(p.FC.editor.serialize(), p.src, 'mixed markdown untouched');
+  const np = p.d.createElement('p');
+  np.textContent = 'New';
+  p.root.appendChild(np);
+  eq(p.FC.editor.serialize(), 'One\r\n\r\nTwo\n\nThree\r\n\r\nNew\r\n', 'new block uses CRLF, old gaps verbatim');
+}
 done();
