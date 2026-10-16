@@ -106,10 +106,13 @@
     const maxStoredMatches = 2000;
     const maxRectsPerMatch = 24;
     // v1.3.0: hi-DPI aware rasterization budget. Each rendered page backs at most
-    // ~9M device pixels (~36MB ARGB), but the ratio now SCALES WITH THE PINCH ZOOM
-    // so zoomed pages stay crisp instead of magnifying a fixed-resolution bitmap.
-    const pagePixelBudget = 9.0e6;
-    const maxRenderRatio = 6;
+    // ~pagePixelBudget device pixels, but the ratio now SCALES WITH THE PINCH ZOOM so
+    // zoomed pages stay crisp instead of magnifying a fixed-resolution bitmap.
+    // Loop 10: the budget is no longer one fixed number for every device — Android
+    // pushes a device-tiered value via setPdfQualityBudget() (heap-signal derived),
+    // because a fixed 9M cap undersampled high-density screens beyond ~2x pinch zoom.
+    let pagePixelBudget = 9.0e6;
+    const maxRenderRatio = 8;
     let renderScaleHint = 1;
     pdfjsLib.GlobalWorkerOptions.workerSrc = assetBase + 'pdf.worker.min.mjs';
 
@@ -247,17 +250,35 @@
       drawHighlights(record);
     }
 
-    async function renderRecord(record) {
-      if (record.rendered || record.renderTask || !record.viewport) return;
+    // Backing-pixel ratio the page WANTS right now: screen density x WebView pinch
+    // scale, clamped by the ratio cap and the per-page pixel budget (Loop 10).
+    function desiredPixelRatio(record) {
       const desired = (window.devicePixelRatio || 1) * Math.max(1, renderScaleHint);
       const pageArea = Math.max(1, record.viewport.width * record.viewport.height);
-      const pixelRatio = Math.max(1, Math.min(desired, maxRenderRatio, Math.sqrt(pagePixelBudget / pageArea)));
-      const canvas = record.canvas;
-      const context = canvas.getContext('2d', { alpha: false });
-      canvas.width = Math.max(1, Math.floor(record.viewport.width * pixelRatio));
-      canvas.height = Math.max(1, Math.floor(record.viewport.height * pixelRatio));
+      return Math.max(1, Math.min(desired, maxRenderRatio, Math.sqrt(pagePixelBudget / pageArea)));
+    }
+
+    async function renderRecord(record) {
+      if (record.rendered || record.renderTask || !record.viewport) return;
+      const pixelRatio = desiredPixelRatio(record);
+      // Already backed at (or above) the achievable ratio: re-rendering would be a
+      // redundant render storm, not a quality gain (Loop 10).
+      if (record.canvas.width > 0 &&
+          record.canvas.width >= Math.floor(record.viewport.width * pixelRatio) - 1) {
+        record.rendered = true;
+        return;
+      }
+      // Loop 10: render into a fresh offscreen canvas and swap it in only when the
+      // render completes. Previously the SAME canvas was resized up-front, which
+      // destroyed the old bitmap and flashed a blank page after every pinch.
+      const target = document.createElement('canvas');
+      target.width = Math.max(1, Math.floor(record.viewport.width * pixelRatio));
+      target.height = Math.max(1, Math.floor(record.viewport.height * pixelRatio));
+      target.style.width = record.viewport.width + 'px';
+      target.style.height = record.viewport.height + 'px';
+      const context = target.getContext('2d', { alpha: false });
       context.fillStyle = '#ffffff';
-      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillRect(0, 0, target.width, target.height);
       const task = record.page.render({
         canvasContext: context,
         viewport: record.viewport,
@@ -267,11 +288,34 @@
       record.renderTask = task;
       try {
         await task.promise;
+        if (!record.viewport) return; // geometry was reset while rendering
+        const stale = record.canvas;
+        if (stale && stale.parentNode === record.element) {
+          record.element.replaceChild(target, stale);
+        } else {
+          record.element.insertBefore(target, record.highlightLayer);
+        }
+        if (stale) {
+          stale.width = 0;
+          stale.height = 0;
+        }
+        record.canvas = target;
+        record.renderedRatio = pixelRatio;
         record.rendered = true;
         classifyPage(record);
         drawHighlights(record);
+        // Bounded one-shot follow-up: if the achievable ratio grew while this render
+        // was in flight (budget push / settle), re-render once instead of leaving a
+        // stale-sharpness page behind. renderRecord early-returns once current.
+        if (desiredPixelRatio(record) > pixelRatio + 0.01) {
+          record.rendered = false;
+          renderRecord(record);
+        }
       } catch (error) {
         if (error && error.name !== 'RenderingCancelledException') console.warn('PDF page render failed', error);
+        // Release the discarded offscreen buffer promptly on failure/cancellation.
+        target.width = 0;
+        target.height = 0;
       } finally {
         if (record.renderTask === task) record.renderTask = null;
       }
@@ -310,10 +354,26 @@
     // v1.3.0 crisp zoom: called by Android (onScaleChanged) after a pinch settles.
     // Re-renders the already-visible pages with a higher backing resolution WITHOUT
     // changing the CSS layout, so the page does not jump — Google Drive behavior.
+    // The old canvas stays on screen until the sharper one is ready (no blank flash).
     function setPdfRenderScale(scale) {
       const next = Math.max(1, Math.min(5, Number(scale) || 1));
       if (Math.abs(next - renderScaleHint) < 0.05) return;
       renderScaleHint = next;
+      pageRecords.forEach(function (record) {
+        if (record.rendered && record.canvas && record.canvas.width > 0 && !record.renderTask) {
+          record.rendered = false;
+          renderRecord(record);
+        }
+      });
+    }
+
+    // Loop 10 (Bug 3B): Android pushes a device-tiered per-page canvas budget derived
+    // from heap signals. Raising it lets visible pages re-render sharper immediately;
+    // lowering it keeps the memory cap meaningful on constrained devices.
+    function setPdfQualityBudget(pixels) {
+      const value = Math.max(4.0e6, Math.min(24.0e6, Number(pixels) || 0));
+      if (!value || Math.abs(value - pagePixelBudget) < 1) return;
+      pagePixelBudget = value;
       pageRecords.forEach(function (record) {
         if (record.rendered && record.canvas && record.canvas.width > 0 && !record.renderTask) {
           record.rendered = false;
@@ -595,6 +655,7 @@
     window.setPdfNightMode = setPdfNightMode;
     window.setPdfZoom = setPdfZoom;
     window.setPdfRenderScale = setPdfRenderScale;
+    window.setPdfQualityBudget = setPdfQualityBudget;
     window.submitPdfPassword = submitPdfPassword;
     window.clearPdfSearch = function () {
       latestRequestId++;

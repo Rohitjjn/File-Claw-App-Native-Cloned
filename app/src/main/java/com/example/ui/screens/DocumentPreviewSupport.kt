@@ -381,3 +381,32 @@ internal fun openPdfInBrowser(context: Context, file: File) {
     }
 }
 
+/**
+ * Pure match-navigation math shared by the viewer header find bar (Loop 10). Kept
+ * side-effect free so the header arrows and the IME Search action provably walk the
+ * same indices, and so the wrap-around behaviour is unit-testable without a device.
+ */
+object InViewerSearchNavigation {
+
+    /**
+     * Wraps forward through [count] matches. Returns null when there is nothing to
+     * navigate (no matches), otherwise the next index clamped into [0, count).
+     */
+    fun nextIndex(current: Int, count: Int): Int? {
+        if (count <= 0) return null
+        val safeCurrent = current.coerceIn(0, count - 1)
+        return (safeCurrent + 1) % count
+    }
+
+    /**
+     * Wraps backward through [count] matches. Returns null when there is nothing to
+     * navigate (no matches), otherwise the previous index clamped into [0, count).
+     */
+    fun prevIndex(current: Int, count: Int): Int? {
+        if (count <= 0) return null
+        val safeCurrent = current.coerceIn(0, count - 1)
+        return (safeCurrent - 1 + count) % count
+    }
+}
+
+
