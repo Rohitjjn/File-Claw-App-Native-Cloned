@@ -99,3 +99,10 @@ Priorities: **P0** data loss / crash / security · **P1** high-impact feature or
 - [ ] HEIC/AVIF fallbacks below API 31; animated WebP.
 - [ ] Sample-file generator removed in 1.1.0; add an optional "demo files" screen if wanted.
 - [ ] Localisation (all strings are hard-coded English).
+
+
+## DOCX preview reliability — 2026-10-16 (branch: `feature/docx-preview-zoom-reliability-2026-10-16`)
+- [ ] Verify viewport-owned horizontal scrolling and zoom anchoring on Android at 25%, 40%, 100%, 200% and 500%.
+- [ ] Verify pinch gestures, toolbar controls, percentage slider, search highlighting/navigation and page tracking remain synchronized after zoom.
+- [ ] Verify the page skeleton remains visible while a large DOCX renders, and renderer failures still show the existing recovery UI.
+- [ ] Run JS syntax check, unit tests, Kotlin compile, debug APK build and CI for the exact branch head; install APK and perform the real-device checklist before merge.
