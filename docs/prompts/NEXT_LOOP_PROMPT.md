@@ -65,3 +65,49 @@ Also: `node --check` on modified inline JS (extract to temp files; module script
 - No proprietary Word/Drive code, no cloud viewers, no network rendering.
 - Do not redesign the DOCX viewer chrome or unrelated TXT/MD UI.
 - Never merge/publish a release without user approval; never modify `main` directly.
+# File Claw — Next Loop Prompt (DOCX preview zoom validation)
+
+## Scope
+Continue only the offline DOCX **preview** path in `feature/docx-preview-zoom-reliability-2026-10-16`. The user reports that DOCX preview is only partly implemented and zoom is badly broken. Preserve File Claw's existing native Compose viewer UI. No document editing, cloud renderer, remote assets, new heavy dependency, or unrelated PDF/TXT/MD redesign.
+
+## Mandatory first steps
+1. Refresh this branch and record exact HEAD/base SHA; inspect open PRs and compare against current `main` before changing files.
+2. Read `rules.md`, `tech-specs.md`, `changelogs.md`, `known-issues.md`, `docs/TODO.md`, `worklog.md`, `BUILD_GUIDE.md` and this prompt.
+3. Inspect current `app/src/main/assets/editor/docx_editor.html`, `app/src/main/java/com/example/ui/screens/FilePreviewScreen.kt::DocxPreviewWebView`, `DocxZoomPolicy.kt`, `PinchGestureGate.kt`, relevant tests and the current diff. Do not revert the viewport/anchor/staging change without evidence.
+
+## Virtual specialist audit team
+- **Compose/gesture specialist:** audit pinch detector, gesture ownership, settle callback, zoom-factor updates, toolbar/slider and double-tap.
+- **WebView/CSS specialist:** test viewport sizing, CSS zoom, transform preview, horizontal/vertical scroll and zoom anchoring at narrow phone widths.
+- **DOCX rendering specialist:** verify bundled docx-preview handles page sections, tables, images, headers/footers and page breaks; record unsupported fidelity rather than claiming Word-perfect output.
+- **QA/performance specialist:** verify skeleton, render failure, large files, search and page count; inspect transient staging memory cost.
+- **Release auditor:** run checks, inspect diff/docs and verify CI for the exact head SHA.
+
+If sub-agents are unavailable, run these audits sequentially and label them as virtual roles, not real parallel agents.
+
+## Implementation order
+1. Reproduce zoom failures using a minimal offline DOCX fixture and identify the actual broken link before further edits.
+2. Verify the current viewport-owned horizontal scroll, 25–500% clamped zoom, page anchoring and render staging. Fix only observed defects.
+3. Keep native Compose toolbar and established File Claw colors/shapes; the HTML asset is the document canvas, not a reason to redesign the app shell.
+4. Confirm offline-only assets and no remote requests. Preserve search highlight/navigation, page tracking, print path and honest renderer-failure recovery.
+5. Add meaningful tests for any new pure Kotlin policy. Add a JS regression harness if available for zoom geometry / render staging; do not add production dependencies solely for tests without weighing APK impact.
+6. Update worklog, changelog, known issues, TODO and this single next-loop prompt based only on verified work.
+
+## Required quality gate
+- `node --check` on the inline script extracted from `docx_editor.html` (or equivalent actual JS syntax check).
+- `./gradlew :app:testDebugUnitTest --no-daemon`
+- `./gradlew :app:compileDebugKotlin --no-daemon`
+- `./gradlew :app:assembleDebug --no-daemon`
+- `git diff --check`, inspect complete diff and CI status for exact HEAD SHA.
+- If SDK/JDK/network prevents a command, mark **NOT RUN** with the exact blocker; never invent green results.
+
+## Device acceptance matrix
+- Open small and large DOCX offline; skeleton remains visible until content is ready.
+- Check 25%, default 40%, 100%, 200%, 500% via toolbar/slider; zoom never jumps back to 100% after load.
+- Pinch in/out repeatedly; no dead gestures, delayed jumps, clipped pages or blank screen.
+- At zoom >100%, horizontal scroll reaches both page edges; zooming preserves the same reading area/page.
+- Search, next/previous match, page progress, dark theme and print remain functional.
+- Force a render failure: existing error/retry UI appears; extracted text must not masquerade as formatted preview.
+- Airplane mode enabled: local DOCX still opens and all assets load.
+
+## PR and handoff
+Create/update one focused PR from the feature branch into `main`; do not merge. Include changed paths, root cause, commands with real outputs, CI link/status, remaining device-only checks, and APK artifact link if CI produced one. Ask the user to test the APK before recommending merge.
