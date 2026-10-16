@@ -1,6 +1,6 @@
 # File Claw - Changelog
-Last Updated: October 15, 2026
-Document Version: 1.2
+Last Updated: October 16, 2026
+Document Version: 1.3
 Next Review Date: January 15, 2027
 
 ## 1. Changelog Format Rules (MANDATORY)
@@ -14,7 +14,52 @@ Next Review Date: January 15, 2027
 - **PATCH**: Bug fixes, minor visual tweaks.
 - Example: `v1.2.4` (Major 1, Minor 2, Patch 4).
 
-## 3. Current Version Section
+## 3. Unreleased Changes (pending device verification)
+**Version:** v1.3.1 (pending — branch `v1.3.1`; the Gradle `versionName` stays `1.3.0` until the APK built by the `Build and Release` workflow is device-tested; the workflow's version input carries the release identity so no inconsistent numbers ship)
+**Date:** October 16, 2026
+**Change Type:** `[FIXED]` / `[ADDED]` / `[CHANGED]`
+**Verification status:** Kotlin compilation, unit tests and APK assembly NOT run in the patch environment (no Android SDK/JDK); delegated to GitHub Actions (`build-and-release.yml`). JavaScript syntax checks, XML validation and static structure checks were run and passed. Device behaviors below are implemented but not yet hardware-verified.
+
+**[ADDED]**
+- **Affected:** `ui/screens/FilePreviewScreen.kt`
+- **Description:** Chrome-style header find bar: while in-document search is active, the app bar row itself is replaced by a compact one-line find bar (close control, focused single-line query field, live `current / total` match badge including `0 / 0`, previous/next arrows, clear-query control); the filename and overflow menu stay hidden until search closes; system back closes find mode first.
+- **Author:** Loop 10 senior-agent team
+- **Affected:** `core/format/PinchGestureGate.kt` (new), `src/test/java/com/example/core/format/PinchGestureGateTest.kt` (new)
+- **Description:** Pure multi-touch gesture gate for the DOCX pinch pipeline: discards transition-event deltas (mixed pointer history), forwards only confirmed stable two-pointer deltas, disarms on finger lift/cancel. Includes seven dedicated unit tests.
+- **Author:** Loop 10 senior-agent team
+- **Affected:** `core/format/PdfRenderBudgetPolicy.kt` (new), `src/test/java/com/example/core/format/PdfRenderBudgetPolicyTest.kt` (new)
+- **Description:** Device-tiered per-page PDF canvas pixel budget derived from heap signals only (`ActivityManager.isLowRamDevice`, `memoryClass` as an app-heap cap — never read as physical RAM): 6M (low-RAM), 9M (<128 heap class), 12M (128–255), 16M (≥256), hard-clamped to [4M, 24M]. Includes eight dedicated unit tests.
+- **Author:** Loop 10 senior-agent team
+- **Affected:** `ui/screens/DocumentPreviewSupport.kt`, `src/test/java/com/example/ui/screens/InViewerSearchNavigationTest.kt` (new)
+- **Description:** Pure `InViewerSearchNavigation` next/prev wrap-around math shared by the header arrows and the IME Search action; stale indices are clamped, empty match lists return null. Includes six dedicated unit tests.
+- **Author:** Loop 10 senior-agent team
+
+**[FIXED]**
+- **Affected:** `ui/screens/FilePreviewScreen.kt`
+- **Description:** In-document search no longer opens a second floating surface below the header — the duplicate floating overlay (149 lines) was removed and its controls moved into the header find bar; closing search hides the keyboard, restores the normal app bar, and clears stale highlights/counts through each engine's existing empty-query path; opening search from focus mode reveals the bars first and focuses the field once (no refocus per keystroke); prev/next are disabled while there are no navigable matches and truncated totals keep the `x/y of N` presentation.
+- **Author:** Loop 10 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt`, `AndroidManifest.xml`
+- **Description:** Inline TXT/Markdown edit tray now sits directly above the Android keyboard while editing: `windowSoftInputMode="adjustResize"` is declared (single inset-dispatch owner, no `adjustPan`) and the tray applies the UNION of navigation-bar and IME insets (`WindowInsets.safeDrawing.only(Bottom)`) only in edit mode, so it animates above the IME without double-counting the gesture-nav area, returns to its normal floating position when the keyboard hides, and reading-mode trays keep their exact previous bottom anchoring.
+- **Author:** Loop 10 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt`, `assets/editor/docx_editor.html`
+- **Description:** DOCX pinch zoom actually scales the rendered document now: the first (transition) pointer event no longer injects a bogus zoom delta that slammed the zoom into the 25%/500% clamp on first contact; zoom commands survive the load window (fresh zoom/theme are reapplied at page finish and unconditionally after every render pass, closing the 100%-flash race); single-finger scroll, long-press selection and horizontal panning are untouched; `@media print` zoom reset is preserved.
+- **Author:** Loop 10 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt`
+- **Description:** The pure-Kotlin DOCX fallback renderer no longer shows dead zoom controls: the zoom-out button, percentage chip and zoom-in button are hidden when the fallback renderer took over, while its text preview and search keep working.
+- **Author:** Loop 10 senior-agent team
+- **Affected:** `assets/pdfjs/search.html`, `ui/screens/FilePreviewScreen.kt`
+- **Description:** PDF text stays sharp after pinch zoom in the practical 2–3× range: the per-page canvas budget is now device-tiered (pushed from Kotlin via `setPdfQualityBudget`), the render-ratio cap rose 6→8, re-renders draw into a fresh offscreen canvas that is swapped in on completion (the previously visible bitmap is never destroyed mid-render — no more blank flash after pinch), redundant re-renders at an already-achieved ratio are skipped, in-flight renders do a single bounded follow-up when the achievable ratio grew, and search highlight coordinates stay percentage-based (zoom-aligned).
+- **Author:** Loop 10 senior-agent team
+
+**[CHANGED]**
+- **Affected:** `assets/pdfjs/search.html`
+- **Description:** `pagePixelBudget` is mutable (`let`, default 9.0e6) and clamped inside `setPdfQualityBudget(pixels)` to [4.0e6, 24.0e6]; `maxRenderRatio` raised from 6 to 8 so high-density screens can reach the devicePixelRatio × pinch-scale backing they need; visible pages re-render first, offscreen canvases are zeroed on release as before.
+- **Author:** Loop 10 senior-agent team
+- **Affected:** `worklog.md` (new), `known-issues.md`, `docs/TODO.md`, `docs/prompts/NEXT_LOOP_PROMPT.md`, `PATCH_NOTES_LOOP10.md` (new)
+- **Description:** Loop 10 documentation: structured worklog entry `LOOP10-SEARCH-IME-ZOOM` (per-persona audit findings, evidence, true check outcomes, device-pending list), Loop 10 known-issue watchlist, TODO loop section, and the replacement next-loop prompt. Patch ZIP contains only the changed files at repository-relative paths (no APK, no build output, no temporary scripts).
+- **Author:** Loop 10 senior-agent team
+
+## 4. Current Version Section
 **Current Version:** v1.3.0
 **Release Date:** October 15, 2026
 **Total Changes:** Search experience overhaul (relevance-ranked global search, match highlighting, themed in-viewer search bar, keyboard actions, WebView re-highlight debounce) + PDF reader fixes (crisp pinch re-rasterization like Google Drive, smart dark mode that keeps photos natural, smooth focus-mode transition) + DOCX upgrades (opens at 40% zoom, pinch-to-zoom, double-tap 40%⇄100% toggle, persisted zoom). Dedicated tests are included for the new pure-Kotlin policies. This repository integration has not been build/test-verified here; Android APK assembly remains delegated to GitHub Actions.
@@ -32,7 +77,7 @@ Next Review Date: January 15, 2027
 **Issues In Progress:**
 - See `known-issues.md`; next-loop prompt lives at `docs/prompts/NEXT_LOOP_PROMPT.md`.
 
-## 4. Version History
+## 5. Version History
 
 ### [v1.3.0] - Search Polish, PDF Reader Fixes & DOCX Zoom (2026-10-15)
 **[ADDED]**
@@ -184,7 +229,7 @@ Next Review Date: January 15, 2027
 - CSV parsing and tabular viewing.
 - Basic Text Editing and Saving capabilities.
 
-## 5. Change Entry Template
+## 6. Change Entry Template
 All upcoming pulls or changes MUST map to this template:
 
 ```markdown
@@ -196,17 +241,17 @@ All upcoming pulls or changes MUST map to this template:
 - **[BREAKING]** (If applicable): Migration details.
 ```
 
-## 6. Update Rules
+## 7. Update Rules
 - **When**: MUST be updated before any branch merge into `main` or `release`.
 - **Who**: The developer executing the change.
 - **Review**: Required during PR code review.
 
-## 7. User-Facing Changelog
+## 8. User-Facing Changelog
 - Derive user notes by ignoring `[REFACTOR]` and technical `[FIXED]` entries.
 - Focus on `[ADDED]` features and user-reported `[FIXED]` items.
 - Example User Note: "Added support for viewing password-protected PDFs!"
 
-## 8. Rollback Log
+## 9. Rollback Log
 *No rollbacks recorded yet.*
 
 ---

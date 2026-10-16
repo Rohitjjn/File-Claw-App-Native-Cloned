@@ -378,9 +378,11 @@
                 docx.renderAsync(arrayBuffer, container, null, options).then(function() {
                     const pages = container.querySelectorAll('.docx');
                     const totalPages = pages.length > 0 ? pages.length : 1;
-                    if (currentZoom !== 1.0) {
-                        setZoom(currentZoom);
-                    }
+                    // Loop 10: always reapply the authoritative zoom after a render.
+                    // setZoom is idempotent at 1.0, and re-applying unconditionally closes
+                    // the race where a zoom command that arrived during rendering was
+                    // followed by a render pass that reset the visual size to 100%.
+                    setZoom(currentZoom);
                     if (document.body.classList.contains('dark')) {
                         setDarkMode(true);
                     }

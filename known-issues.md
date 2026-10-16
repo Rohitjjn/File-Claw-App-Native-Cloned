@@ -1,6 +1,6 @@
 # File Claw - Known Issues & Tech Debt
-Last Updated: October 15, 2026
-Document Version: 1.1
+Last Updated: October 16, 2026
+Document Version: 1.2
 Next Review Date: January 15, 2027
 
 ## 1. Issue Classification System
@@ -28,6 +28,14 @@ Next Review Date: January 15, 2027
 - **PDF smart-dark classification threshold**: the 4% saturated-pixel cutoff is a heuristic; pages that mix large photos WITH body text invert the photos only if the text dominates. Tunable in `classifyPage()` (`assets/pdfjs/search.html`).
 - **DOCX pinch vs text selection**: 2-finger gestures are consumed at the Initial pass; long-press selection inside the rendered DOCX is unaffected, but exotic WebView widgets may need per-case validation.
 - **Search ranking is name-only**: global search still matches file NAMES, not contents; content search is planned (see `docs/prompts/NEXT_LOOP_PROMPT.md`).
+
+### Loop 10 watchlist (all items implemented; NOT yet device-verified)
+- **PDF zoom budget now device-tiered** (`PdfRenderBudgetPolicy`, pushed via `setPdfQualityBudget`): 6M/9M/12M/16M pixels per page by heap tier. Watch `dumpsys meminfo` and logcat for renderer kills at 5× on the 16M tier; if a device class still struggles, the bounded strategy to investigate next is viewport/tile rendering, not removing caps.
+- **DOCX pinch transition-skip**: the new `PinchGestureGate` discards pointer-count-change events; verify on hardware that starting a pinch feels immediate (one skipped event should not be perceptible) and that adding/removing a finger mid-pinch does not jump the zoom.
+- **DOCX fallback controls hidden**: when the pure-Kotlin text fallback renders a DOCX, zoom in/out/chip are hidden by design; if users ask for zoom there, implement it in the fallback rather than re-enabling dead controls.
+- **Edit tray vs IME**: the tray uses the `safeDrawing.bottom` union only while `isEditMode`; verify three-button navigation (navbar + IME must not double-pad) and that opening the keyboard never scrolls/loses the caret or exits edit mode.
+- **Back closes find first**: deliberate Chrome-style behavior added in Loop 10; if any flow expected back to leave the document while find is open, revisit before promoting v1.3.1 to stable.
+- **PDF blank-flash**: re-renders now swap an offscreen canvas on completion; confirm no flicker remains on slow devices where the settle re-render takes >300ms (the old bitmap stays visible meanwhile by design).
 
 ## 4. Recently Fixed Issues
 - **Light-mode status bar icons invisible (user-reported, Loop 7)**: `enableEdgeToEdge()` set icon appearance from the system dark-mode flag once, while the canvas followed the in-app theme. *Fix*: `FilesClawTheme` now re-asserts `isAppearanceLightStatusBars/NavigationBars` on the host window whenever the in-app theme resolves (`ui/theme/Theme.kt`).
@@ -73,3 +81,4 @@ Next Review Date: January 15, 2027
 ---
 **Update Log**
 - 2026-06-15: v1.0 - Initial document creation.
+- 2026-10-16: v1.2 - Added Loop 10 watchlist (header find bar, IME-aware edit tray, DOCX pinch gate, device-tiered PDF budget, offscreen swap render); bumped document version/date.
