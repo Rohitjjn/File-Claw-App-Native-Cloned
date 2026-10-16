@@ -1,6 +1,6 @@
 # File Claw - Changelog
 Last Updated: October 16, 2026
-Document Version: 1.3
+Document Version: 1.4
 Next Review Date: January 15, 2027
 
 ## 1. Changelog Format Rules (MANDATORY)
@@ -15,7 +15,51 @@ Next Review Date: January 15, 2027
 - Example: `v1.2.4` (Major 1, Minor 2, Patch 4).
 
 ## 3. Unreleased Changes (pending device verification)
-**Version:** v1.3.2 (pending — recommended branch `v1.3.2`; the Gradle `versionName` stays `1.3.0` until the APK built by the `Build and Release` workflow is device-tested; the workflow's version input carries the release identity so no inconsistent numbers ship)
+**Version:** v1.3.3 (pending — recommended branch `v1.3.3`; the Gradle `versionName` stays `1.3.0` until the APK built by the `Build and Release` workflow is device-tested; the workflow's version input carries the release identity so no inconsistent numbers ship)
+**Date:** October 16, 2026
+**Change Type:** `[FIXED]` / `[ADDED]` / `[REMOVED]` / `[CHANGED]`
+**Verification status:** Kotlin compilation, unit tests and APK assembly NOT run in the patch environment (no Android SDK/JDK); delegated to GitHub Actions (`build-and-release.yml`). `node --check` PASSED for every edited inline script (search.html classic + module, docx_editor.html); manifest XML parse PASSED; brace/paren balance of every touched Kotlin file PASSED. Additionally, the DOCX renderer and the PDF reader were executed end-to-end in a real headless Chromium against real files (see PATCH_NOTES_LOOP14.md) — DOCX rendered as Word-like pages with a table, search and navigation worked, PDF rotation/zoom/skeletons/virtualization behaved as designed. Device verification is still pending.
+
+**[FIXED]**
+- **Affected:** `ui/screens/FilePreviewScreen.kt`, `assets/editor/docx_editor.html`
+- **Description:** REAL DOCX RENDERING RESTORED — the root cause of "DOCX looks like plain text extraction". The Loop 12 streaming change registered the editor page under the WebViewAssetLoader prefix `/editor/` and loaded `/editor/docx_editor.html`; WebViewAssetLoader hands each handler the path with the prefix STRIPPED, so `AssetsPathHandler` tried to open the asset `docx_editor.html` — which actually lives at `editor/docx_editor.html`. The main frame 404ed on EVERY DOCX, the `onReceivedError` path kicked in and the viewer silently landed in the plain-text fallback, which looked exactly like TXT extraction. Fixed by registering `/assets/` (the documented pattern, same as the PDF reader) and loading `/assets/editor/docx_editor.html`; the local-URL whitelist was updated to match. The pre-Loop-12 build (`file:///android_asset/editor/…`) was verified as the last known good implementation via git history. Proven against androidx.webkit source (`getSuffixPath` strips the prefix; `AssetsPathHandler` opens the suffix directly).
+- **Author:** Loop 14 senior-agent team
+- **Affected:** `assets/editor/docx_editor.html`
+- **Description:** DOCX find-in-document was silently broken: the Loop 12 rewrite of `docx_editor.html` dropped the `maxSearchHighlights` declaration while `searchWord()` still read it, so every query that actually matched threw `ReferenceError` and the find bar never received a count (queries with zero matches masked the bug). All five search-engine globals are declared explicitly again (cap restored at 5000, matching the TXT/MD preview script and Loop 10). Found by executing the real page in a headless browser against a real DOCX.
+- **Author:** Loop 14 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt`, `assets/pdfjs/search.html`
+- **Description:** Search highlights now follow the text through PDF rotation: match rectangles are stored in UNROTATED page space and mapped into the current display orientation on every draw (`rotateNormRect`, mirrored by the new pure `PdfRotationPolicy.rotateRect`). An earlier draft computed the mapping at search time, which the browser test caught — highlights stayed put after a rotate.
+- **Author:** Loop 14 senior-agent team
+- **Affected:** `AndroidManifest.xml`
+- **Description:** Rotation no longer kills the viewer session: `MainActivity` now declares `configChanges` (orientation, screenSize, screenLayout, smallestScreenSize, keyboardHidden, keyboard, uiMode, density, locale, layoutDirection). Previously a device rotation (or a system theme flip) recreated the Activity, which destroyed the WebView, dropped the authenticated PDF.js document and the in-memory password, and re-prompted for the PDF password (BUG-003's zoom reset had the same root cause). The Activity now survives configuration changes and Compose recomposes from the updated configuration.
+- **Author:** Loop 14 senior-agent team
+
+**[ADDED]**
+- **Affected:** `ui/screens/FilePreviewScreen.kt`, `core/format/PdfRotationPolicy.kt` (new), `src/test/java/com/example/core/format/PdfRotationPolicyTest.kt` (new)
+- **Description:** Right-edge draggable page scrubber restored (no historical implementation existed in git — verified by `-S` sweeps across all branches; an equivalent was implemented per the loop prompt). A slim rail with a grabbable thumb sits over the page-margin area, widens while grabbed, shows `current / total` in a bubble while dragging, and maps the drag fraction to a valid page via `PdfRotationPolicy.pageFromFraction`; navigation fires on release through the shared gotoPdfPage pipeline, so pages passed over are never eagerly rendered. 44dp-wide accessible hit target with a semantic description, clear of system gesture insets, synchronized with the visible-page observer and the page indicator. 16 new unit tests cover rotation math, rect mapping, anchor clamping and scrubber mapping.
+- **Author:** Loop 14 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt`
+- **Description:** Toolbar Rotate button (in the Search button's former slot, Search moved into the Night/Light slot, Print unchanged — exact Loop 14 requirement). Rotation is pure viewer state in 90-degree steps pushed into the already-loaded PDF.js document (`setPageRotation`): pages re-render from the authenticated document object with the rotation baked into the pdf.js viewport, old canvases stay visible until the rotated replacements swap in atomically, the reading position is preserved with a page + within-page-fraction anchor, and a password-protected file is never asked again.
+- **Author:** Loop 14 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt`, `assets/pdfjs/search.html`, `assets/editor/docx_editor.html`
+- **Description:** Skeleton loading states. PDF open/metadata/password initialization shows neutral page-shaped shimmer cards (no spinner-only screen); each not-yet-rendered page inside the virtualized list carries a subtle shimmer placeholder that clears the moment its real canvas swaps in (and reappears when a page is released by the LRU, exactly matching live content); DOCX open shows the same page-shaped skeleton treatment. `prefers-reduced-motion` disables the animations.
+- **Author:** Loop 14 senior-agent team
+- **Affected:** `ui/screens/FilePreviewScreen.kt`, `ui/screens/DocumentPreviewSupport.kt`, `src/test/java/com/example/ui/screens/DocxTextRecoveryTest.kt` (new)
+- **Description:** Honest DOCX recovery state: the plain-text view is now explicitly labeled "Formatted preview failed — showing recovered text" with the renderer failure reason (clamped, content-free) and a "Retry formatted view" button that rebuilds the WebView. The old "Clean Document View" banner masqueraded as a feature; the new `DocxTextRecovery` policy keeps the decision pure and unit-tested (text shows only when extraction actually recovered content). The source document is never modified.
+- **Author:** Loop 14 senior-agent team
+
+**[CHANGED]**
+- **Affected:** `assets/pdfjs/search.html`, `ui/screens/FilePreviewScreen.kt`
+- **Description:** PDF zoom expanded to 8x: the viewport `maximum-scale` and both JS clamps (`setPdfZoom`, `setPdfRenderScale`) now allow 8x logical zoom (the Loop 10 `maxRenderRatio = 8` backing cap already matched). Memory stays bounded exactly as before — every canvas is still clamped by the total RGBA budget, the ratio cap and the 8192px dimension ceiling, and the resident-page LRU still keeps at most 3 canvases; horizontal panning works at high zoom.
+- **Author:** Loop 14 senior-agent team
+
+**[REMOVED]**
+- **Affected:** `assets/pdfjs/search.html`, `core/format/PdfDarkModePolicy.kt` (deleted), `src/test/java/com/example/core/format/PdfDarkModePolicyTest.kt` (deleted), `ui/screens/FilePreviewScreen.kt`
+- **Description:** PDF dark mode removed entirely per the Loop 14 scope: the toolbar and overflow-menu night toggles, the `setPdfNightMode` bridge command, the `body.dark` CSS palette, the per-page invert/natural classifier and the `PdfDarkModePolicy` (with its 14 tests) are gone — PDFs always display their original light colors regardless of the system or in-app theme, with no blanket inversion or brightness filters. Dark mode remains available for DOCX (state renamed `isDocxNightMode`), TXT, Markdown and other types.
+- **Author:** Loop 14 senior-agent team
+
+## 4. v1.3.2 (shipped — uploaded to branch `v1.3.2`, merged to `main` in PR #27, tag `v10.0.5`; device testing of that build produced the Loop 14 issue reports)
+**Version:** v1.3.2 (shipped)
 **Date:** October 16, 2026
 **Change Type:** `[FIXED]` / `[ADDED]` / `[CHANGED]` / `[PERFORMANCE]`
 **Verification status:** Kotlin compilation, unit tests and APK assembly NOT run in the patch environment (no Android SDK/JDK); delegated to GitHub Actions (`build-and-release.yml`). `node --check` passed for every edited inline script (search.html classic + module, docx_editor.html), HTML structure checks passed, and the brace/paren balance of every edited Kotlin file matches the pristine baseline exactly. Device behaviors below are implemented but not yet hardware-verified.
@@ -52,7 +96,7 @@ Next Review Date: January 15, 2027
 - **Description:** Three pure, unit-tested policies introduced this loop: canvas dimension/area clamps, dark-mode tone classification, and WebView find-bar command planning. Static `@Test` count baseline at loop start was 167; 30 methods were added (9 + 14 + 7).
 - **Author:** Loop 12 senior-agent team
 
-## 4. v1.3.1 (shipped — uploaded to branch `v1.3.1`, merged to `main` in PR #26, tag `v10.0.4`; device testing of that build produced the Loop 12 issue reports)
+## 5. v1.3.1 (shipped — uploaded to branch `v1.3.1`, merged to `main` in PR #26, tag `v10.0.4`; device testing of that build produced the Loop 12 issue reports)
 **Version:** v1.3.1 (pending — branch `v1.3.1`; the Gradle `versionName` stays `1.3.0` until the APK built by the `Build and Release` workflow is device-tested; the workflow's version input carries the release identity so no inconsistent numbers ship)
 **Date:** October 16, 2026
 **Change Type:** `[FIXED]` / `[ADDED]` / `[CHANGED]`
@@ -97,7 +141,7 @@ Next Review Date: January 15, 2027
 - **Description:** Loop 10 documentation: structured worklog entry `LOOP10-SEARCH-IME-ZOOM` (per-persona audit findings, evidence, true check outcomes, device-pending list), Loop 10 known-issue watchlist, TODO loop section, and the replacement next-loop prompt. Patch ZIP contains only the changed files at repository-relative paths (no APK, no build output, no temporary scripts).
 - **Author:** Loop 10 senior-agent team
 
-## 5. Current Version Section
+## 6. Current Version Section
 **Current Version:** v1.3.0
 **Release Date:** October 15, 2026
 **Total Changes:** Search experience overhaul (relevance-ranked global search, match highlighting, themed in-viewer search bar, keyboard actions, WebView re-highlight debounce) + PDF reader fixes (crisp pinch re-rasterization like Google Drive, smart dark mode that keeps photos natural, smooth focus-mode transition) + DOCX upgrades (opens at 40% zoom, pinch-to-zoom, double-tap 40%⇄100% toggle, persisted zoom). Dedicated tests are included for the new pure-Kotlin policies. This repository integration has not been build/test-verified here; Android APK assembly remains delegated to GitHub Actions.
@@ -115,7 +159,7 @@ Next Review Date: January 15, 2027
 **Issues In Progress:**
 - See `known-issues.md`; next-loop prompt lives at `docs/prompts/NEXT_LOOP_PROMPT.md`.
 
-## 6. Version History
+## 7. Version History
 
 ### [v1.3.0] - Search Polish, PDF Reader Fixes & DOCX Zoom (2026-10-15)
 **[ADDED]**
@@ -267,7 +311,7 @@ Next Review Date: January 15, 2027
 - CSV parsing and tabular viewing.
 - Basic Text Editing and Saving capabilities.
 
-## 7. Change Entry Template
+## 8. Change Entry Template
 All upcoming pulls or changes MUST map to this template:
 
 ```markdown
@@ -279,17 +323,17 @@ All upcoming pulls or changes MUST map to this template:
 - **[BREAKING]** (If applicable): Migration details.
 ```
 
-## 8. Update Rules
+## 9. Update Rules
 - **When**: MUST be updated before any branch merge into `main` or `release`.
 - **Who**: The developer executing the change.
 - **Review**: Required during PR code review.
 
-## 9. User-Facing Changelog
+## 10. User-Facing Changelog
 - Derive user notes by ignoring `[REFACTOR]` and technical `[FIXED]` entries.
 - Focus on `[ADDED]` features and user-reported `[FIXED]` items.
 - Example User Note: "Added support for viewing password-protected PDFs!"
 
-## 10. Rollback Log
+## 11. Rollback Log
 *No rollbacks recorded yet.*
 
 ---

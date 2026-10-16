@@ -139,6 +139,18 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.material.icons.outlined.RotateRight
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 
 /** Where the in-document viewer should scroll next (outline tap / go-to-line). */
 data class ViewerScrollRequest(
@@ -375,8 +387,19 @@ fun FilePreviewScreen(
     var totalPdfPages by remember { mutableStateOf(0) }
     var showPropertiesDialog by remember { mutableStateOf(false) }
 
-    var isPdfNightMode by remember(activeFile?.path) { mutableStateOf(isDarkTheme) }
+    // Loop 14: PDF view rotation in 90-degree steps (toolbar Rotate button). Pure
+    // viewer state — the PDF.js document session is never reloaded, so password
+    // protected files are asked once per open session. PDFs always display in
+    // light mode now, so the night-mode state is DOCX-only and keeps its
+    // system-theme seed for documents that still support dark mode.
+    var pdfViewRotation by remember(activeFile?.path) { mutableIntStateOf(0) }
+
+    var isDocxNightMode by remember(activeFile?.path) { mutableStateOf(isDarkTheme) }
     var scrollToPage by remember { mutableStateOf<Int?>(null) }
+    // Loop 14: bumped on every explicit jump (scrubber release, Go-to-Page dialog) so
+    // re-navigating to the SAME page number still re-fires the WebView navigation
+    // effect (a repeated identical Int would not).
+    var pageJumpToken by remember { mutableIntStateOf(0) }
     var pendingLinkToOpen by remember { mutableStateOf<String?>(null) }
     var showJumpDialog by remember { mutableStateOf(false) }
     var showJumpToLineDialog by remember { mutableStateOf(false) }
@@ -713,13 +736,16 @@ fun FilePreviewScreen(
             WindowCompat.setDecorFitsSystemWindows(window, false)
             val insetsController = WindowCompat.getInsetsController(window, window.decorView)
             insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            // Loop 14: PDF always renders in light mode regardless of the in-app theme,
+            // so the status-bar canvas follows the system theme for PDFs again.
             val isDarkCanvas = when (activeFile?.extension?.lowercase()) {
-                "pdf", "docx", "doc" -> isPdfNightMode
+                "pdf" -> isDarkTheme
+                "docx", "doc" -> isDocxNightMode
                 else -> isDarkTheme
             }
             val canvasColor = when (activeFile?.extension?.lowercase()) {
-                "pdf" -> if (isPdfNightMode) android.graphics.Color.rgb(24, 24, 24) else android.graphics.Color.rgb(240, 240, 240)
-                "docx", "doc" -> if (isPdfNightMode) android.graphics.Color.rgb(21, 21, 20) else android.graphics.Color.rgb(250, 249, 245)
+                "pdf" -> android.graphics.Color.rgb(240, 240, 240)
+                "docx", "doc" -> if (isDocxNightMode) android.graphics.Color.rgb(21, 21, 20) else android.graphics.Color.rgb(250, 249, 245)
                 else -> if (isDarkTheme) android.graphics.Color.rgb(24, 23, 21) else android.graphics.Color.rgb(250, 249, 245)
             }
             window.decorView.setBackgroundColor(canvasColor)
@@ -930,19 +956,24 @@ fun FilePreviewScreen(
                                             )
                                         }
                                     )
-                                    DropdownMenuItem(
-                                        text = { Text(if (isPdfNightMode) "Light Mode" else "Dark Mode") },
-                                        onClick = {
-                                            showMenu = false
-                                            isPdfNightMode = !isPdfNightMode
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = if (isPdfNightMode) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
-                                                contentDescription = "Toggle Dark Mode"
-                                             )
-                                        }
-                                    )
+                                    // Loop 14: the PDF night/light toggle was removed entirely —
+                                    // PDFs always render in light mode. Dark mode remains for
+                                    // DOCX/TXT/Markdown and other file types.
+                                    if (!isPdf) {
+                                        DropdownMenuItem(
+                                            text = { Text(if (isDocxNightMode) "Light Mode" else "Dark Mode") },
+                                            onClick = {
+                                                showMenu = false
+                                                isDocxNightMode = !isDocxNightMode
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = if (isDocxNightMode) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
+                                                    contentDescription = "Toggle Dark Mode"
+                                                 )
+                                            }
+                                        )
+                                    }
                                     if (isPdf) {
                                         DropdownMenuItem(
                                             text = { Text("Open in System Viewer") },
@@ -1193,7 +1224,25 @@ fun FilePreviewScreen(
                                         }
                                     }
 
-                                    // Find in PDF
+                                    // Loop 14: Rotate PDF view (occupies the Search button's
+                                    // former slot). Rotates the rendered document in 90-degree
+                                    // steps — pure viewer state, so the authenticated PDF.js
+                                    // document session is never reloaded and a password-protected
+                                    // file is never asked again.
+                                    IconButton(
+                                        onClick = { pdfViewRotation = com.example.core.format.PdfRotationPolicy.stepAfter(pdfViewRotation) },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.RotateRight,
+                                            contentDescription = "Rotate PDF 90 degrees",
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+
+                                    // Find in PDF (Loop 14: moved into the Night/Light toggle's
+                                    // former slot; the PDF-only night mode was removed entirely)
                                     IconButton(
                                         onClick = { toggleInViewerSearch() },
                                         modifier = Modifier.size(36.dp)
@@ -1203,19 +1252,6 @@ fun FilePreviewScreen(
                                             contentDescription = "Find in document",
                                             modifier = Modifier.size(18.dp),
                                             tint = if (isSearchInDocumentOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-
-                                    // Night / Light Mode toggle pill
-                                    IconButton(
-                                        onClick = { isPdfNightMode = !isPdfNightMode },
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isPdfNightMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                            contentDescription = "Toggle night mode",
-                                            modifier = Modifier.size(18.dp),
-                                            tint = if (isPdfNightMode) Color(0xFFFFB74D) else MaterialTheme.colorScheme.onSurface
                                         )
                                     }
 
@@ -1317,14 +1353,14 @@ fun FilePreviewScreen(
 
                                     // DOCX Night Mode toggle
                                     IconButton(
-                                        onClick = { isPdfNightMode = !isPdfNightMode },
+                                        onClick = { isDocxNightMode = !isDocxNightMode },
                                         modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
-                                            imageVector = if (isPdfNightMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                            imageVector = if (isDocxNightMode) Icons.Default.LightMode else Icons.Default.DarkMode,
                                             contentDescription = "Toggle night mode",
                                             modifier = Modifier.size(18.dp),
-                                            tint = if (isPdfNightMode) Color(0xFFFFB74D) else MaterialTheme.colorScheme.onSurface
+                                            tint = if (isDocxNightMode) Color(0xFFFFB74D) else MaterialTheme.colorScheme.onSurface
                                         )
                                     }
 
@@ -1990,11 +2026,18 @@ fun FilePreviewScreen(
                 is MainViewModel.FileContentState.PdfSuccess -> {
                     PdfPreview(
                         fileEntity = state.file,
-                        isNightMode = isPdfNightMode,
+                        viewRotation = pdfViewRotation,
                         searchQuery = inViewerSearchQuery,
                         selectedMatchIndex = currentMatchIndex,
                         scrollToPage = scrollToPage,
+                        scrollToken = pageJumpToken,
                         onScrollToPageHandled = { scrollToPage = null },
+                        scrubberPage = currentPdfPage,
+                        scrubberPageCount = totalPdfPages,
+                        onScrubJump = { page ->
+                            scrollToPage = page - 1
+                            pageJumpToken++
+                        },
                         onSearchSnapshot = { snapshot, searching ->
                             pdfSearchSnapshot = snapshot
                             totalMatchesCount = snapshot.count
@@ -2020,7 +2063,7 @@ fun FilePreviewScreen(
                     DocxPreviewWebView(
                         base64Docx = state.base64Data,
                         fileEntity = state.file,
-                        isNightMode = isPdfNightMode,
+                        isNightMode = isDocxNightMode,
                         viewModel = viewModel,
                         modifier = Modifier.fillMaxSize(),
                         onPageChanged = { page, total ->
@@ -2059,7 +2102,7 @@ fun FilePreviewScreen(
                     PptxPreviewWebView(
                         base64Pptx = state.base64Data,
                         fileEntity = state.file,
-                        isNightMode = isPdfNightMode,
+                        isNightMode = isDocxNightMode,
                         viewModel = viewModel,
                         modifier = Modifier.fillMaxSize()
                     )
@@ -2176,6 +2219,7 @@ fun FilePreviewScreen(
                         val pNum = pageInput.toIntOrNull()
                         if (pNum != null && pNum in 1..totalPdfPages) {
                             scrollToPage = pNum - 1
+                            pageJumpToken++
                         } else {
                             android.widget.Toast.makeText(context, "Invalid page number", android.widget.Toast.LENGTH_SHORT).show()
                         }
@@ -3714,11 +3758,22 @@ private fun isBundledPdfReaderUri(uri: android.net.Uri): Boolean {
 @Composable
 fun PdfPreview(
     fileEntity: RecentFileEntity,
-    isNightMode: Boolean,
+    // Loop 14: PDF view rotation in degrees clockwise (0/90/180/270). Pure viewer
+    // state pushed into the already-loaded PDF.js document — the WebView is never
+    // recreated for a rotate, so the authenticated session and the password state
+    // survive. PDFs render in light mode only (the Loop 14 dark-mode removal).
+    viewRotation: Int = 0,
     searchQuery: String = "",
     selectedMatchIndex: Int = 0,
     scrollToPage: Int?,
+    // Loop 14: bumped per explicit jump so repeated identical page numbers still fire.
+    scrollToken: Int = 0,
     onScrollToPageHandled: () -> Unit,
+    // Loop 14: right-edge page scrubber inputs. Values come from the visible-page
+    // observer in the caller; jumps are delegated back through onScrubJump.
+    scrubberPage: Int = 1,
+    scrubberPageCount: Int = 0,
+    onScrubJump: (Int) -> Unit = {},
     onSearchSnapshot: (PdfSearchSnapshot, Boolean) -> Unit = { _, _ -> },
     onSearchError: (String) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -3798,9 +3853,14 @@ fun PdfPreview(
             if (isPdfReady) webView.evaluateJavascript("searchPdf($query);", null)
         }
     }
-    LaunchedEffect(webViewRef, isJavascriptReady, isNightMode) {
-        if (isJavascriptReady) {
-            webViewRef?.evaluateJavascript("setPdfNightMode($isNightMode);", null)
+    // Loop 14: rotation is viewer state pushed into the loaded PDF.js document.
+    // This is deliberately NOT part of the WebView key: rotating must never
+    // recreate the WebView, refetch the document or re-run the password flow —
+    // the authenticated PDFDocumentProxy stays alive and pages re-render from it.
+    LaunchedEffect(webViewRef, isPdfReady, viewRotation) {
+        if (webViewRef != null && isPdfReady) {
+            val normalized = com.example.core.format.PdfRotationPolicy.normalize(viewRotation)
+            webViewRef?.evaluateJavascript("if (window.setPageRotation) setPageRotation($normalized);", null)
         }
     }
     LaunchedEffect(webViewRef, isJavascriptReady, selectedMatchIndex) {
@@ -3808,7 +3868,7 @@ fun PdfPreview(
             webViewRef?.evaluateJavascript("showPdfSearchMatch($selectedMatchIndex);", null)
         }
     }
-    LaunchedEffect(webViewRef, isPdfReady, scrollToPage) {
+    LaunchedEffect(webViewRef, isPdfReady, scrollToPage, scrollToken) {
         if (isPdfReady && scrollToPage != null) {
             webViewRef?.evaluateJavascript("gotoPdfPage(${scrollToPage + 1});", null)
             onScrollToPageHandled()
@@ -3844,7 +3904,7 @@ fun PdfPreview(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(if (isNightMode) Color(0xFF191A1B) else Color(0xFFF0F0F0))
+            .background(Color(0xFFF0F0F0)) // Loop 14: PDF is always light mode
     ) {
         if (pdfErrorMessage == null) {
             androidx.compose.runtime.key(fileEntity.path, pdfReloadKey) {
@@ -3852,7 +3912,7 @@ fun PdfPreview(
                     factory = { viewContext ->
                         android.webkit.WebView(viewContext).apply {
                             webViewRef = this
-                            setBackgroundColor(if (isNightMode) 0xFF191A1B.toInt() else 0xFFF0F0F0.toInt())
+                            setBackgroundColor(0xFFF0F0F0.toInt())
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = false
@@ -3970,7 +4030,7 @@ fun PdfPreview(
                     },
                     update = { webView ->
                         webViewRef = webView
-                        webView.setBackgroundColor(if (isNightMode) 0xFF191A1B.toInt() else 0xFFF0F0F0.toInt())
+                        webView.setBackgroundColor(0xFFF0F0F0.toInt()) // Loop 14: always light
                         if (webView.tag != fileEntity.path) {
                             webView.tag = fileEntity.path
                             isJavascriptReady = false
@@ -3990,11 +4050,27 @@ fun PdfPreview(
         }
 
         if (!isPdfReady && pdfErrorMessage == null) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                com.example.ui.component.PremiumLoadingIndicator(
-                    text = if (requirePassword) "Password required" else "Opening PDF..."
-                )
-            }
+            // Loop 14: skeleton loading — neutral page-shaped placeholders with a soft
+            // shimmer replace the spinner-only screen during document open/metadata/
+            // password initialization. The password dialog overlays this skeleton; the
+            // error state below replaces it entirely.
+            PdfOpeningSkeleton()
+        }
+
+        // Loop 14: right-edge page scrubber. Only rendered once the document is ready
+        // and there is more than one page; the visible-page observer keeps it in sync
+        // (page events flow up through onPageChanged), jumps flow down through the
+        // shared gotoPdfPage pipeline (no eager rendering of the pages passed over).
+        if (isPdfReady && pdfErrorMessage == null && scrubberPageCount > 1) {
+            PdfPageScrubber(
+                currentPage = scrubberPage.coerceIn(1, scrubberPageCount),
+                pageCount = scrubberPageCount,
+                onJumpRequest = onScrubJump,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .navigationBarsPadding()
+                    .padding(end = 2.dp)
+            )
         }
 
         if (pdfErrorMessage != null) {
@@ -4064,6 +4140,193 @@ fun PdfPreview(
                 dismissButton = { TextButton(onClick = onBackClick) { Text("Cancel") } }
             )
         }
+    }
+}
+
+/**
+ * Loop 14: neutral skeleton placeholders shown while the PDF opens (file read,
+ * worker boot, metadata/page-count/password initialization). Page-shaped cards
+ * with a soft shimmer — never a spinner-only screen — and they disappear the
+ * moment the real content, the password dialog or an error state takes over.
+ */
+@Composable
+private fun PdfOpeningSkeleton(modifier: Modifier = Modifier) {
+    val shimmer = rememberInfiniteTransition(label = "pdf-skeleton")
+    val alpha by shimmer.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 850, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pdf-skeleton-alpha"
+    )
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 22.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text(
+            text = "Preparing document…",
+            fontSize = 12.sp,
+            color = Color(0xFF6C6A64),
+            modifier = Modifier.padding(start = 2.dp)
+        )
+        repeat(3) { index ->
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    // Stable dimensions/aspect ratio: A4-ish portrait cards on the light
+                    // reader canvas, matching the real pages that replace them.
+                    .aspectRatio(0.72f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.White.copy(alpha = alpha))
+                    .border(
+                        width = 1.dp,
+                        color = Color(0xFF191919).copy(alpha = 0.10f),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+            ) {
+                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(0.45f)
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFFD8D4CC).copy(alpha = alpha))
+                    )
+                    repeat(4 - (index % 2)) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(if (it == 3) 0.6f else 1f)
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFFE4E0D8).copy(alpha = alpha))
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Loop 14: right-edge draggable page scrubber. A slim rail with a grabbable
+ * thumb sits over the page-margin area (never over body text), shows
+ * `current / total` in a bubble while dragging, and maps the drag fraction to a
+ * valid 1-based page via [PdfRotationPolicy.pageFromFraction]. Navigation fires
+ * on release through [onJumpRequest] — the pages passed over are NOT eagerly
+ * rendered, the shared gotoPdfPage pipeline simply scrolls to the target.
+ */
+@Composable
+private fun PdfPageScrubber(
+    currentPage: Int,
+    pageCount: Int,
+    onJumpRequest: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Self-contained drag state: fraction 0..1 along the rail, whether the thumb
+    // is currently held, and the page the thumb maps to right now.
+    var isDragging by remember { mutableStateOf(false) }
+    var dragFraction by remember { mutableFloatStateOf(0f) }
+    val density = LocalDensity.current
+    val railHeight = 170.dp
+    val railHeightPx = with(density) { railHeight.toPx() }
+    val displayPage = if (isDragging) {
+        com.example.core.format.PdfRotationPolicy.pageFromFraction(dragFraction, pageCount)
+    } else {
+        currentPage
+    }
+
+    fun fractionFromY(y: Float): Float = (y / railHeightPx).coerceIn(0f, 1f)
+
+    Box(
+        modifier = modifier
+            .width(44.dp)
+            .height(railHeight)
+            .semantics {
+                contentDescription =
+                    "Page scrubber. Drag to jump between pages. Page $displayPage of $pageCount."
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        // Track: subtle rounded rail that widens slightly while grabbed.
+        Box(
+            modifier = Modifier
+                .width(if (isDragging) 8.dp else 5.dp)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0xFF191919).copy(alpha = if (isDragging) 0.30f else 0.18f))
+        )
+        // Thumb with the positional tick mark.
+        Box(
+            modifier = Modifier
+                .offset(y = railHeight * (if (isDragging) dragFraction else com.example.core.format.PdfRotationPolicy.fractionForPage(currentPage, pageCount)) - 11.dp)
+                .size(width = 22.dp, height = 22.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(
+                    if (isDragging) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
+                )
+                .shadow(if (isDragging) 4.dp else 2.dp, RoundedCornerShape(7.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                Modifier
+                    .width(10.dp)
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.White.copy(alpha = 0.9f))
+            )
+        }
+        // Page bubble while scrubbing: `current / total`, mirrors the page indicator.
+        if (isDragging) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = (-34).dp)
+            ) {
+                Text(
+                    text = "$displayPage / $pageCount",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+            }
+        }
+        // Gesture surface covers the whole rail area — an accessible hit target
+        // comfortably above the 48dp minimum, clear of the system gesture inset
+        // by the trailing padding applied by the caller.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(pageCount) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            isDragging = true
+                            dragFraction = fractionFromY(offset.y)
+                        },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            dragFraction = fractionFromY(change.position.y)
+                        },
+                        onDragEnd = {
+                            val page = com.example.core.format.PdfRotationPolicy
+                                .pageFromFraction(dragFraction, pageCount)
+                            isDragging = false
+                            onJumpRequest(page)
+                        },
+                        onDragCancel = { isDragging = false }
+                    )
+                }
+        )
     }
 }
 
@@ -4560,10 +4823,22 @@ fun DocxPreviewWebView(
     var isWebViewLoading by remember(base64Docx) { mutableStateOf(true) }
     var webViewRef by remember(base64Docx) { mutableStateOf<android.webkit.WebView?>(null) }
     var pureKotlinFallback by remember(base64Docx) { mutableStateOf<com.example.core.format.DocxExtractor.ExtractedDocx?>(null) }
+    // Loop 14: the plain-text view is an honest RECOVERY state, never a normal
+    // preview. The renderer failure reason is surfaced verbatim (no document
+    // content, no sensitive data) and Retry rebuilds the WebView from scratch.
+    var fallbackReason by remember(base64Docx) { mutableStateOf<String?>(null) }
+    var docxReloadKey by remember(base64Docx) { mutableIntStateOf(0) }
     // Ledger of what the renderer's search engine has already been told (Loop 12, Bug
     // B): navigation triggers now issue ONLY next/prev deltas; re-issuing searchWord()
     // per arrow press used to reset the match index to 0 so the counter stuck at 2/N.
     var issuedSearch by remember(base64Docx) { mutableStateOf(InViewerSearchCommandPolicy.Issued()) }
+    fun retryDocxRender() {
+        pureKotlinFallback = null
+        fallbackReason = null
+        isWebViewLoading = true
+        issuedSearch = InViewerSearchCommandPolicy.Issued()
+        docxReloadKey++
+    }
     // Display-frame throttle (~30/s) for the pinch preview path (Bug E: coalescing).
     var lastDisplayDispatchNanos by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
     val context = LocalContext.current
@@ -4643,22 +4918,50 @@ fun DocxPreviewWebView(
         if (pureKotlinFallback != null) {
             val extracted = pureKotlinFallback!!
             Column(modifier = Modifier.fillMaxSize()) {
+                // Loop 14: labeled recovery/error state — the extracted text must never
+                // masquerade as a successful formatted preview (the old "Clean Document
+                // View" banner looked like a feature, not a failure).
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = .15f),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = .5f),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
-                    Text(
-                        text = "Clean Document View • ${extracted.wordCount} words • ${extracted.paragraphCount} paragraphs",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        Text(
+                            text = com.example.ui.screens.DocxTextRecovery.bannerHeadline(),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        com.example.ui.screens.DocxTextRecovery.displayReason(fallbackReason)?.let { reason ->
+                            Text(
+                                text = reason,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = .75f),
+                                maxLines = 2
+                            )
+                        }
+                        com.example.ui.screens.DocxTextRecovery
+                            .statsLabel(extracted.wordCount, extracted.paragraphCount)?.let { stats ->
+                                Text(
+                                    text = stats,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = .75f)
+                                )
+                            }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+                            // Retry rebuilds the WebView and re-runs the real renderer;
+                            // the source document is never modified.
+                            TextButton(
+                                onClick = { retryDocxRender() },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                            ) { Text("Retry formatted view", fontSize = 12.sp) }
+                        }
+                    }
                 }
                 if (extracted.paragraphs.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No text content found in this DOCX file.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
+                        Text("No text content could be recovered from this DOCX file.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
                     }
                 } else {
                     PlainTextPreview(
@@ -4675,7 +4978,7 @@ fun DocxPreviewWebView(
                 }
             }
         } else {
-            androidx.compose.runtime.key(base64Docx) {
+            androidx.compose.runtime.key(base64Docx, docxReloadKey) {
                 AndroidView(
                     factory = { viewContext ->
                         // Loop 12 (Bug E): the editor page is now served through the
@@ -4683,8 +4986,20 @@ fun DocxPreviewWebView(
                         // DOCX bytes can be streamed to docx-preview as an ArrayBuffer
                         // instead of a ~1.33x-larger base64 String crossing the JS bridge
                         // (which peaked at ~5 simultaneous copies of large documents).
+                        //
+                        // Loop 14 REGRESSION FIX: the editor was previously registered under
+                        // "/editor/" and loaded at /editor/docx_editor.html. WebViewAssetLoader
+                        // hands each handler the path with the registered prefix STRIPPED, so
+                        // AssetsPathHandler tried to open the asset "docx_editor.html" — which
+                        // lives at "editor/docx_editor.html" — and every DOCX open failed the
+                        // main-frame load, silently landing in the plain-text recovery view.
+                        // Registering "/assets/" (the documented pattern, same as the PDF
+                        // reader) makes /assets/editor/docx_editor.html resolve to the real
+                        // asset editor/docx_editor.html. The /docx-src/ stream is unaffected:
+                        // its custom handler receives the stripped suffix "document.docx",
+                        // which is exactly what it matches on.
                         val docxAssetLoader = androidx.webkit.WebViewAssetLoader.Builder()
-                            .addPathHandler("/editor/", androidx.webkit.WebViewAssetLoader.AssetsPathHandler(context))
+                            .addPathHandler("/assets/", androidx.webkit.WebViewAssetLoader.AssetsPathHandler(context))
                             .addPathHandler("/docx-src/", object : androidx.webkit.WebViewAssetLoader.PathHandler {
                                 override fun handle(path: String): android.webkit.WebResourceResponse? {
                                     if (path != "document.docx") return null
@@ -4766,13 +5081,15 @@ fun DocxPreviewWebView(
                                     mainHandler.post {
                                         isWebViewLoading = false
                                         android.util.Log.w("WebViewDocx", "Switching to text-only DOCX preview: $error")
-                                        val extracted = com.example.core.format.DocxExtractor.extractText(File(fileEntity.path))
-                                        if (extracted.paragraphs.isNotEmpty()) {
-                                            pureKotlinFallback = extracted
-                                            latestRendererFallbackCallback.value(true)
-                                        } else {
-                                            android.widget.Toast.makeText(context, "DOCX Notice: $error", android.widget.Toast.LENGTH_SHORT).show()
-                                        }
+                                        val extracted = runCatching {
+                                            com.example.core.format.DocxExtractor.extractText(File(fileEntity.path))
+                                        }.getOrNull()
+                                        // Loop 14: always enter the labeled recovery state (even with
+                                        // zero recovered paragraphs) so a failed render is never left
+                                        // as a silent blank surface or a deceptively normal preview.
+                                        fallbackReason = error.take(180)
+                                        pureKotlinFallback = extracted
+                                        latestRendererFallbackCallback.value(true)
                                     }
                                 }
 
@@ -4804,7 +5121,7 @@ fun DocxPreviewWebView(
                                     val uri = request?.url ?: return true
                                     val localEditorAsset = uri.scheme == "https" &&
                                         uri.host == "appassets.androidplatform.net" &&
-                                        (uri.path?.startsWith("/editor/") == true || uri.path?.startsWith("/docx-src/") == true)
+                                        (uri.path?.startsWith("/assets/editor/") == true || uri.path?.startsWith("/docx-src/") == true)
                                     return !localEditorAsset
                                 }
 
@@ -4823,13 +5140,17 @@ fun DocxPreviewWebView(
                                     super.onReceivedError(view, request, error)
                                     if (request?.isForMainFrame == true) {
                                         android.util.Log.e("WebViewDocx", "Error: ${error?.description}")
-                                        val extracted = com.example.core.format.DocxExtractor.extractText(File(fileEntity.path))
-                                        if (extracted.paragraphs.isNotEmpty()) {
-                                            view?.post {
-                                                pureKotlinFallback = extracted
-                                                latestRendererFallbackCallback.value(true)
-                                                isWebViewLoading = false
-                                            }
+                                        val extracted = runCatching {
+                                            com.example.core.format.DocxExtractor.extractText(File(fileEntity.path))
+                                        }.getOrNull()
+                                        // Loop 14: honest recovery state with the failure reason
+                                        // (the Loop 12 /editor/ registration 404 surfaced HERE).
+                                        view?.post {
+                                            fallbackReason = error?.description?.toString()?.take(180)
+                                                ?: "The preview page could not be loaded."
+                                            pureKotlinFallback = extracted
+                                            latestRendererFallbackCallback.value(true)
+                                            isWebViewLoading = false
                                         }
                                     }
                                 }
@@ -4850,6 +5171,7 @@ fun DocxPreviewWebView(
                                         val extracted = runCatching {
                                             com.example.core.format.DocxExtractor.extractText(File(fileEntity.path))
                                         }.getOrNull()
+                                        fallbackReason = "The document renderer stopped unexpectedly."
                                         pureKotlinFallback = extracted
                                         latestRendererFallbackCallback.value(true)
                                         isWebViewLoading = false
@@ -4872,7 +5194,7 @@ fun DocxPreviewWebView(
                                     return true
                                 }
                             }
-                            loadUrl("https://appassets.androidplatform.net/editor/docx_editor.html")
+                            loadUrl("https://appassets.androidplatform.net/assets/editor/docx_editor.html")
                         }
                     },
                     update = { webView ->
