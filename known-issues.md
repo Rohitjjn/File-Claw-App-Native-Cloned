@@ -1,6 +1,6 @@
 # File Claw - Known Issues & Tech Debt
 Last Updated: October 16, 2026
-Document Version: 1.2
+Document Version: 1.3
 Next Review Date: January 15, 2027
 
 ## 1. Issue Classification System
@@ -19,7 +19,7 @@ Next Review Date: January 15, 2027
 
 | ID | Title | Severity | Status | Area | Description & Workaround |
 |----|-------|----------|--------|------|--------------------------|
-| BUG-003 | PDF Zoom Reset on Rotation | MEDIUM| OPEN| `UI`| Activity recreation loses `pdfScale` bounds. |
+| BUG-003 | PDF Zoom Reset on Rotation | MEDIUM | CLOSED (Loop 14) | `UI` | Root cause fixed: `MainActivity` now handles orientation/screen/theme config changes itself, so the Activity (and its WebView + zoom state) survives device rotation. Device re-verification pending. |
 | BUG-004 | CSV Table Horizontal Scroll | LOW| OPEN| `UI`| Extreme widths cause minor clipping on strict bounds. |
 | BUG-005 | Password Field Obscuring | LOW| OPEN| `UI`| Keyboard overlaps the unlock dialog on small screens. |
 | BUG-006 | PDF placeholder geometry estimated from page 1 | LOW | OPEN (Loop 12 watchlist) | `PDF_ENGINE` | Very large PDFs open instantly now, but page placeholders use page 1's size until each real page is fetched; mixed-orientation documents can shift layout slightly on first approach. Same tradeoff as the official pdf.js viewer. |
@@ -49,7 +49,20 @@ Next Review Date: January 15, 2027
 - **DOCX streamed bytes**: open DOCX from storage AND from inside a zip; if `/docx-src/document.docx` ever fails, the page falls back to the base64 bridge automatically — confirm the fallback path still renders.
 - **Renderer-crash recovery**: hard to trigger deliberately; if the PDF viewer ever shows "The PDF renderer stopped unexpectedly.", the Try Again button must rebuild it (and DOCX must fall back to Clean Document View).
 
+### Loop 14 watchlist (all items implemented; NOT yet device-verified)
+- **DOCX real rendering**: the `/assets/` WebViewAssetLoader registration must be smoke-tested with DOCX files from storage AND from inside a zip (the streamed `/docx-src/document.docx` path plus the base64 bridge fallback). If a DOCX ever still lands in the recovery view, the honest banner now shows the renderer's failure reason — report that text.
+- **PDF rotate button**: rotate through 90/180/270/0 on a middle page of a large document; page, scroll anchor, search state and zoom must survive; password-protected files must NOT re-prompt. Toolbar order must read: Page indicator, Rotate, Search, Print, Share.
+- **Page scrubber**: drag first→last→first on a 500+ page PDF; the bubble counts with the thumb; release jumps without rendering the pages passed over (`dumpsys meminfo` should stay flat during a fast drag).
+- **PDF always light**: open a PDF under Android system dark mode — the viewer, its status-bar canvas and page colors must stay light; DOCX dark mode must still work.
+- **8x zoom**: pinch to the max on a text page — text stays sharp (1:1 backing at ratio 8), panning works, memory stays within the resident budget; `dumpsys meminfo` before/after.
+- **configChanges breadth**: verify no screen regressed from Activity-recreation removal (theme switch, locale change, split-screen resize) — Compose recomposes from configuration, but this is the biggest lifecycle change shipped in a while.
+- **Loop 12 carry-overs still open**: BUG-006 (mixed-orientation placeholder shift), BUG-007 (DOCX pinch horizontal overflow), resident-window=3 blank-gap watch, dark-mode dim tuning (DOCX only now).
+
 ## 4. Recently Fixed Issues
+- **DOCX preview looked like plain text extraction (user-reported, Loop 14)**: every DOCX open failed the main-frame load because the editor was registered under the WebViewAssetLoader prefix `/editor/` while the asset lives at `editor/docx_editor.html` — the loader strips the prefix, so the asset 404ed and the viewer silently fell back to extracted text (introduced by the Loop 12 streaming change; commit `7d11163`). *Fix*: register `/assets/` (documented pattern, same as the PDF reader) and load `/assets/editor/docx_editor.html`; verified against androidx.webkit source AND by rendering a real DOCX in headless Chromium. *Device verification pending.*
+- **DOCX find never reported results (found by browser test, Loop 14)**: the Loop 12 rewrite of `docx_editor.html` dropped the `maxSearchHighlights` declaration while `searchWord()` still read it — every matching query threw `ReferenceError`. *Fix*: all five search-engine globals declared explicitly (cap 5000). *Device verification pending.*
+- **Rotation re-prompted the PDF password / reset zoom (BUG-003, Loop 14)**: Activity recreation on device rotation destroyed the WebView and the authenticated PDF.js session. *Fix*: `configChanges` on `MainActivity`; plus the new Rotate button is pure viewer state that never touches the WebView lifecycle. *Device verification pending.*
+- **PDF dark mode removed (user request, Loop 14)**: toggle, menu item, bridge command, dark CSS, per-page classifier and `PdfDarkModePolicy` deleted; PDFs always render light. Supersedes the Loop 12 "By Design" tradeoff for mixed text+photo pages (no longer relevant — no inversion at all). *Device verification pending.*
 - **Search arrows stopped at 2–3 of N matches (user-reported, Loop 12)**: the DOCX and TXT/MD WebView search effects re-ran `searchWord()` on every arrow press, which resets the renderer's active match index to 0 before advancing one step — the counter could never move past 2 regardless of the real match count. *Fix*: pure `InViewerSearchCommandPolicy` plans the commands (query searched once, arrows issue only next/prev deltas, counter resets absorbed); 7 unit tests prove all N matches reachable both directions (`FilePreviewScreen.kt`, `DocumentPreviewSupport.kt`). *Device verification pending.*
 - **Very large PDF pages rendered permanently blank (user-reported via "struggling with large PDFs", Loop 12)**: the render-ratio floor of 1.0 plus missing per-dimension cap let oversized canvases exceed Chromium's silent canvas limits. *Fix*: `PdfCanvasDimensionPolicy` — area budget AND 8192px per-dimension cap, 0.05 floor, downsampling instead of blanking; mirrored in `renderPixelRatio()`.
 - **Heavy PDFs ballooned memory / opened slowly (user-reported, Loop 12)**: every page was fetched up front and retained forever; extracted search text duplicated the whole document; 3–5 canvases could be resident against a per-page-only budget. *Fix*: lazy placeholder open (page 1 only), `page.cleanup()` + proxy drop on release, resident-window LRU (max 3 canvases), total-RGBA budget across residents, 128-page text LRU (`search.html`, `PdfRenderBudgetPolicy.totalCanvasBytes`). *Device verification pending.*
@@ -86,7 +99,7 @@ Next Review Date: January 15, 2027
 ## 8. Won't Fix / By Design
 - **DOCX Formatting Loss**: Custom parser strictly isolates text. Retaining word-perfect structural formatting (images, fonts, alignments) is `BY_DESIGN` ignored to keep the app lightweight and avoid bloated Apache POI imports.
 - **No Cloud Sync**: App is marketed and designed as purely offline file manager. Network APIs are excluded intentionally.
-- **Dark mode: mixed text+photo pages stay light (Loop 12)**: a single page canvas cannot selectively invert text around an embedded image. Only near-binary text pages invert; mixed pages keep original colors slightly dimmed. Inverting them would re-introduce the ghosted-portrait bug — this is the accepted tradeoff.
+- **PDF has no dark mode (Loop 14)**: removed by scope decision — PDF pages always display their original light colors; no classifier, no filters. DOCX/TXT/Markdown keep dark mode.
 - **Tile rendering at extreme PDF zoom (Loop 12)**: a bounded viewport/tile design exists on paper but cannot be verified (tile coordinates, scroll/highlight/cleanup interplay) without a device; shipping a partial tile implementation is explicitly out of scope. Whole-page rendering with dimension caps remains the shipped behavior — see `docs/prompts/NEXT_LOOP_PROMPT.md` backlog.
 
 ## 9. Issue Triage Rules
@@ -101,4 +114,5 @@ Next Review Date: January 15, 2027
 ---
 **Update Log**
 - 2026-06-15: v1.0 - Initial document creation.
+- 2026-10-16: v1.3 - Loop 14: BUG-003 closed (configChanges), DOCX WebViewAssetLoader + find regressions recorded, Loop 14 watchlist, PDF dark-mode removal noted; bumped document version.
 - 2026-10-16: v1.2 - Added Loop 10 watchlist (header find bar, IME-aware edit tray, DOCX pinch gate, device-tiered PDF budget, offscreen swap render); bumped document version/date.

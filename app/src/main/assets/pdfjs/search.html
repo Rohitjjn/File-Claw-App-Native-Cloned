@@ -2,9 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=0.25, maximum-scale=5, user-scalable=yes">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=0.25, maximum-scale=8, user-scalable=yes">
   <title>File Claw PDF Reader</title>
   <style>
+    /* Loop 14: PDF is ALWAYS light mode. The dark palette, the invert/natural page
+       classifier and every night-mode CSS rule were removed — the viewer keeps the
+       original light look no matter what the system or in-app theme says. */
     :root {
       color-scheme: light;
       --reader-background: #f0f0f0;
@@ -48,28 +51,6 @@
       overflow: hidden;
       pointer-events: none;
     }
-    body.dark {
-      color-scheme: dark;
-      --reader-background: #191a1b;
-      --page-background: #252627;
-      --page-shadow: 0 4px 20px rgba(0, 0, 0, .55);
-      --page-border: rgba(255, 255, 255, .08);
-    }
-    /* Loop 12 dark mode (Bug D): a CSS filter cannot selectively invert text while
-       preserving an embedded photo — the whole rendered page shares one canvas. So
-       pages are classified after every render and only CONFIDENTLY near-binary text
-       pages (no colorful pixels, no continuous-tone pixels) are inverted. Everything
-       else keeps its original colors, slightly dimmed; portraits can no longer turn
-       into negatives, at the cost of mixed pages staying lighter than ideal. */
-    body.dark .pdf-page.invert canvas {
-      filter: invert(1) hue-rotate(180deg) brightness(.94) contrast(.92);
-    }
-    body.dark .pdf-page.natural canvas {
-      filter: brightness(.9) contrast(1.04);
-    }
-    body.dark .pdf-page.natural {
-      background: #2a2b2c;
-    }
     .pdf-search-highlight {
       position: absolute;
       min-width: 2px;
@@ -82,13 +63,27 @@
       outline: 2px solid rgba(204, 120, 92, .95);
       z-index: 2;
     }
-    body.dark .pdf-search-highlight {
-      background: rgba(204, 120, 92, .55);
-      box-shadow: inset 0 0 0 1px rgba(255, 213, 179, .3);
+    /* Loop 14 (skeletons): pages that have never rendered show a neutral shimmer
+       pulse instead of a plain white rectangle. The class is only present while
+       there is no bitmap to display; finished, failed and re-rendered pages keep
+       their existing canvas visible (no skeleton over live content). */
+    .pdf-page.skeleton::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(100deg,
+        rgba(25, 25, 25, 0) 30%,
+        rgba(25, 25, 25, 0.06) 50%,
+        rgba(25, 25, 25, 0) 70%);
+      animation: pdf-skeleton-pulse 1.4s ease-in-out infinite;
+      pointer-events: none;
     }
-    body.dark .pdf-search-highlight.active {
-      background: rgba(232, 165, 90, .85);
-      outline-color: rgba(255, 196, 128, .96);
+    @keyframes pdf-skeleton-pulse {
+      0% { transform: translateX(-60%); }
+      100% { transform: translateX(60%); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .pdf-page.skeleton::after { animation: none; }
     }
     /* Loop 12 (Bug C): per-page render failure recovery. A failed page used to stay
        permanently blank until the user scrolled far enough away and back. */
@@ -106,6 +101,7 @@
       text-align: center;
       padding: 24px;
       box-sizing: border-box;
+      z-index: 3;
     }
     .page-failure button {
       padding: 8px 18px;
@@ -143,6 +139,7 @@
     // per-page number ignored that 3-5 pages are resident at once inside the
     // IntersectionObserver prefetch window — the main reason heavy PDFs struggled.
     let pagePixelBudget = 12.0e6;
+    // Loop 10 raised this from 6 to 8 with the device-tiered budget; Loop 14 keeps 8.
     const maxRenderRatio = 8;
     // Mirrors PdfRenderBudgetPolicy.RESIDENT_PAGE_WINDOW / BYTES_PER_PIXEL.
     const residentPageWindow = 3;
@@ -173,6 +170,11 @@
     let currentZoom = 1;
     let pageObserver = null;
     let currentPage = 0;
+    // Loop 14: PDF view rotation in degrees clockwise (0/90/180/270), driven from
+    // Android via setPageRotation(). Pure viewer state — rotating NEVER reloads the
+    // document, recreates the WebView or re-runs the password flow: pages are
+    // re-rendered from the already-authenticated PDF.js document object.
+    let pageRotation = 0;
 
     function bridgeCall(name, ...args) {
       try {
@@ -273,12 +275,41 @@
       const right = Math.max(x1, x2);
       const top = transform[5] - fontHeight;
       const bottom = transform[5] + Math.max(1, fontHeight * .18);
-      return {
+      const unrotated = {
         left: Math.max(0, Math.min(1, left / viewport.width)),
         top: Math.max(0, Math.min(1, top / viewport.height)),
         right: Math.max(0, Math.min(1, right / viewport.width)),
         bottom: Math.max(0, Math.min(1, bottom / viewport.height))
       };
+      // Loop 14: rects are stored in UNROTATED page space; drawHighlights maps them
+      // into the current display orientation on every draw, so highlights follow
+      // the text through rotation without re-searching (PdfRotationPolicy.rotateRect
+      // mirrors this mapping in the tested Kotlin policy).
+      return unrotated;
+    }
+
+    function rotateNormRect(rect, degrees) {
+      const rotation = ((Math.round(degrees) % 360) + 360) % 360;
+      if (rotation === 0) return rect;
+      if (rotation === 90) {
+        return {
+          left: 1 - rect.bottom, top: rect.left,
+          right: 1 - rect.top, bottom: rect.right
+        };
+      }
+      if (rotation === 180) {
+        return {
+          left: 1 - rect.right, top: 1 - rect.bottom,
+          right: 1 - rect.left, bottom: 1 - rect.top
+        };
+      }
+      if (rotation === 270) {
+        return {
+          left: rect.top, top: 1 - rect.right,
+          right: rect.bottom, bottom: 1 - rect.left
+        };
+      }
+      return rect;
     }
 
     function computePageScale(baseWidth) {
@@ -286,9 +317,15 @@
       return Math.max(.1, Math.min(availableWidth / Math.max(1, baseWidth), 2.5)) * currentZoom;
     }
 
+    // Loop 14: fit scale must use the ROTATED base width, otherwise quarter-turn
+    // pages are fit against the wrong axis and overflow horizontally.
+    function rotatedBaseWidth(baseWidth, baseHeight) {
+      return (pageRotation % 180 === 90) ? baseHeight : baseWidth;
+    }
+
     function pageScale(page) {
       const base = page.getViewport({ scale: 1 });
-      return computePageScale(base.width);
+      return computePageScale(rotatedBaseWidth(base.width, base.height));
     }
 
     // Loop 12 (Bug C): pages are no longer all fetched up front. Records start with
@@ -322,9 +359,17 @@
       record.canvas.style.height = viewport.height + 'px';
     }
 
-    function updateRecordGeometry(record) {
+    // Loop 14: pdf.js viewport with the user rotation baked in (the page's own
+    // intrinsic /Rotate is included by pdf.js in page.rotate; the user rotation is
+    // added on top and the total normalized). Mirrors PdfRotationPolicy.normalize.
+    function pageViewport(page, scale) {
+      const totalRotation = (((Number(page.rotate) || 0) + pageRotation) % 360 + 360) % 360;
+      return page.getViewport({ scale: scale, rotation: totalRotation });
+    }
+
+    function updateRecordGeometry(record, keepCanvas) {
       if (!record.page) return; // placeholder records keep their estimated size
-      const nextViewport = record.page.getViewport({ scale: pageScale(record.page) });
+      const nextViewport = pageViewport(record.page, pageScale(record.page));
       if (record.viewport &&
           Math.abs(record.viewport.width - nextViewport.width) < 0.5 &&
           Math.abs(record.viewport.height - nextViewport.height) < 0.5) {
@@ -338,8 +383,15 @@
         try { record.renderTask.cancel(); } catch (_) {}
         record.renderTask = null;
       }
-      record.canvas.width = 0;
-      record.canvas.height = 0;
+      // keepCanvas=true (Loop 14 rotation): the old bitmap stays visible and the
+      // freshly rendered, correctly rotated canvas replaces it atomically — no
+      // blank flash while the new orientation renders. Zoom keeps the original
+      // zero-and-realloc behavior (bounds shrink, memory freed sooner).
+      if (!keepCanvas) {
+        record.canvas.width = 0;
+        record.canvas.height = 0;
+        showRecordSkeleton(record);
+      }
       drawHighlights(record);
     }
 
@@ -372,6 +424,18 @@
         releaseRecord(candidates[index]);
         if (!candidates[index].rendered) renderedCount--;
       }
+    }
+
+    // Loop 14 (skeletons): a page element carries the 'skeleton' class only while it
+    // has no usable bitmap — after prepareDocument, after a release, or while an
+    // updateRecordGeometry pass zeroed the canvas. The class is removed the moment a
+    // real canvas is swapped in, and never drawn over live content.
+    function showRecordSkeleton(record) {
+      if (record.element) record.element.classList.add('skeleton');
+    }
+
+    function clearRecordSkeleton(record) {
+      if (record.element) record.element.classList.remove('skeleton');
     }
 
     // Loop 12 (Bug C): a failed page shows a local retry affordance instead of
@@ -421,7 +485,7 @@
         if (!page || record.disposed) return;
         // The placeholder size was estimated from page 1; sync to the real page
         // geometry before rasterizing (uniform-size documents are a no-op here).
-        updateRecordGeometry(record);
+        updateRecordGeometry(record, false);
         if (!record.viewport || record.rendered || record.renderTask || record.renderFailed) return;
         enforceResidentWindow();
         const pixelRatio = renderPixelRatio(record);
@@ -469,7 +533,7 @@
           record.lastRenderedAt = Date.now();
           record.renderTask = null; // slot free; the finally below stays a no-op
           clearPageFailure(record);
-          classifyPage(record);
+          clearRecordSkeleton(record);
           drawHighlights(record);
           enforceResidentWindow();
           // The page may have scrolled out of the prefetch window while this render
@@ -501,55 +565,16 @@
       }
     }
 
-    // Loop 12 dark mode: sample a tiny downscale of the rendered page and decide
-    // between `invert` (confidently near-binary text page) and `natural` (anything
-    // that might contain a photo: color, grayscale portraits, charts, scans, mixed
-    // pages). Thresholds mirror PdfDarkModePolicy; when in doubt, keep natural —
-    // the failure direction is "slightly brighter page", never a ghosted portrait.
-    function classifyPage(record) {
-      try {
-        const canvas = record.canvas;
-        if (!canvas || !canvas.width || !canvas.height) return;
-        const targetHeight = 48;
-        const ratio = canvas.width / canvas.height;
-        const w = Math.max(1, Math.round(targetHeight * ratio));
-        const h = targetHeight;
-        const off = document.createElement('canvas');
-        off.width = w;
-        off.height = h;
-        const octx = off.getContext('2d', { willReadFrequently: true });
-        if (!octx) return;
-        octx.drawImage(canvas, 0, 0, w, h);
-        const data = octx.getImageData(0, 0, w, h).data;
-        let colorful = 0;
-        let midtone = 0;
-        let light = 0;
-        let total = 0;
-        for (let i = 0; i < data.length; i += 4) {
-          const spread = Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2]);
-          const luma = (data[i] + data[i + 1] + data[i + 2]) / 3;
-          if (spread > 40) colorful++;
-          else if (luma >= 200) light++;
-          else if (luma >= 56) midtone++;
-          total++;
-        }
-        const colorfulRatio = total > 0 ? colorful / total : 1;
-        const midtoneRatio = total > 0 ? midtone / total : 1;
-        const lightRatio = total > 0 ? light / total : 0;
-        // Mirrors PdfDarkModePolicy.shouldInvert.
-        const invert = colorfulRatio <= 0.015 && midtoneRatio <= 0.12 && lightRatio >= 0.55;
-        record.element.classList.toggle('invert', invert);
-        record.element.classList.toggle('natural', !invert);
-        record.element.classList.remove('photo');
-      } catch (_) { /* classification is best-effort */ }
-    }
+    // Loop 14: the per-page dark-mode classifier was removed with the PDF night
+    // mode itself — PDF pages now always display their original light colors.
 
     // v1.3.0 crisp zoom: called by Android (onScaleChanged) after a pinch settles.
     // Re-renders the already-visible pages with a higher backing resolution WITHOUT
     // changing the CSS layout, so the page does not jump — Google Drive behavior.
     // The old canvas stays on screen until the sharper one is ready (no blank flash).
+    // Loop 14: the hint cap follows the viewport's maximum-scale (8x).
     function setPdfRenderScale(scale) {
-      const next = Math.max(1, Math.min(5, Number(scale) || 1));
+      const next = Math.max(1, Math.min(8, Number(scale) || 1));
       if (Math.abs(next - renderScaleHint) < 0.05) return;
       renderScaleHint = next;
       pageRecords.forEach(function (record) {
@@ -587,6 +612,7 @@
       record.canvas.width = 0;
       record.canvas.height = 0;
       record.rendered = false;
+      showRecordSkeleton(record);
       clearPageFailure(record);
       // Loop 12: drop the PDFPageProxy as well. page.cleanup() frees the worker-side
       // operator list and decoded objects for this page (it is a safe no-op while a
@@ -604,7 +630,10 @@
       for (let matchIndex = 0; matchIndex < searchMatches.length; matchIndex++) {
         const match = searchMatches[matchIndex];
         if (match.pageNumber !== record.pageNumber) continue;
-        for (const rect of match.rectangles) {
+        for (const storedRect of match.rectangles) {
+          // Loop 14: stored rects live in unrotated page space and are mapped into
+          // the CURRENT display orientation here, on every draw.
+          const rect = rotateNormRect(storedRect, pageRotation);
           const highlight = document.createElement('div');
           highlight.className = 'pdf-search-highlight' + (matchIndex === activeMatchIndex ? ' active' : '');
           highlight.style.left = (rect.left * 100) + '%';
@@ -636,11 +665,16 @@
     }
 
     // Placeholder records have no page proxy yet; re-derive their estimated size so
-    // zoom changes keep the scroll layout roughly correct before first render.
+    // zoom and rotation changes keep the scroll layout roughly correct before first
+    // render. Loop 14: quarter turns swap the estimated axes (PdfRotationPolicy).
     function updatePlaceholderGeometry(record) {
       if (record.page || !record.baseWidth) return;
-      const scale = computePageScale(record.baseWidth);
-      record.viewport = { width: record.baseWidth * scale, height: record.baseHeight * scale };
+      const scale = computePageScale(rotatedBaseWidth(record.baseWidth, record.baseHeight));
+      const baseW = record.baseWidth * scale;
+      const baseH = record.baseHeight * scale;
+      record.viewport = (pageRotation % 180 === 90)
+        ? { width: baseH, height: baseW }
+        : { width: baseW, height: baseH };
       applyRecordSize(record, record.viewport);
     }
 
@@ -675,7 +709,9 @@
 
       for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber++) {
         const pageElement = document.createElement('section');
-        pageElement.className = 'pdf-page natural';
+        // Loop 14: 'skeleton' until the first canvas lands; the dark 'natural' class
+        // went away with the PDF night mode.
+        pageElement.className = 'pdf-page skeleton';
         pageElement.dataset.pageNumber = String(pageNumber);
         const canvas = document.createElement('canvas');
         canvas.setAttribute('aria-label', 'Page ' + pageNumber);
@@ -876,19 +912,94 @@
       }
     }
 
-    function setPdfNightMode(isNight) {
-      document.body.classList.toggle('dark', Boolean(isNight));
-    }
+    // Loop 14: PDF night mode was removed — the bridge entry point is gone. PDFs
+    // always display in light mode.
 
     function setPdfZoom(factor) {
-      currentZoom = Math.max(.25, Math.min(5, Number(factor) || 1));
+      // Loop 14: the logical zoom cap follows the viewport's maximum-scale (8x).
+      // Memory stays bounded: renderPixelRatio() clamps every canvas by the total
+      // RGBA budget, the ratio cap and the 8192px dimension ceiling regardless of
+      // how far the user pinches.
+      currentZoom = Math.max(.25, Math.min(8, Number(factor) || 1));
+      const anchor = captureScrollAnchor();
       pageRecords.forEach(function (record) {
-        if (record.page) updateRecordGeometry(record);
+        if (record.page) updateRecordGeometry(record, false);
         else updatePlaceholderGeometry(record);
         if (pageObserver) pageObserver.unobserve(record.element);
       });
       if (pageObserver) pageRecords.forEach(function (record) { pageObserver.observe(record.element); });
       else pageRecords.slice(0, 4).forEach(renderRecord);
+      restoreScrollAnchor(anchor);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Loop 14: view rotation. The toolbar button pushes setPageRotation(deg);
+    // everything else is derived here:
+    //   - every record's geometry is re-derived with the rotation baked into the
+    //     pdf.js viewport (quarter turns swap width/height), placeholders included;
+    //   - old canvases are KEPT on screen while the correctly rotated replacements
+    //     render offscreen, then swapped atomically (no blank flash, no page-1 reset);
+    //   - the reading position is preserved with a page + within-page-fraction
+    //     anchor (PdfRotationPolicy.scrollTopForAnchor mirrors the math);
+    //   - search highlights re-map through rotateNormRect for the new orientation.
+    // The authenticated document session is untouched: no reload, no password prompt.
+    // ---------------------------------------------------------------------------
+    function captureScrollAnchor() {
+      const scroller = document.scrollingElement || document.documentElement || document.body;
+      if (!scroller) return { page: Math.max(1, currentPage), fraction: 0, top: 0 };
+      const record = pageRecords[currentPage - 1];
+      if (!record || !record.element) return { page: Math.max(1, currentPage), fraction: 0, top: scroller.scrollTop };
+      const elementTop = record.element.offsetTop;
+      const elementHeight = Math.max(1, record.element.offsetHeight);
+      const within = scroller.scrollTop - elementTop;
+      return {
+        page: Math.max(1, currentPage),
+        // Mirrors PdfRotationPolicy.anchorFraction (clamped 0..1).
+        fraction: Math.min(1, Math.max(0, within / elementHeight)),
+        top: scroller.scrollTop
+      };
+    }
+
+    function restoreScrollAnchor(anchor) {
+      if (!anchor) return;
+      const scroller = document.scrollingElement || document.documentElement || document.body;
+      const record = pageRecords[anchor.page - 1];
+      if (!scroller || !record || !record.element) {
+        if (scroller && anchor.top != null) scroller.scrollTop = anchor.top;
+        return;
+      }
+      // Mirrors PdfRotationPolicy.scrollTopForAnchor (clamped 0..1).
+      const fraction = Math.min(1, Math.max(0, Number(anchor.fraction) || 0));
+      scroller.scrollTop = record.element.offsetTop + fraction * Math.max(1, record.element.offsetHeight);
+    }
+
+    function setPageRotation(degrees) {
+      const next = ((Math.round(Number(degrees) || 0) % 360) + 360) % 360;
+      if (next === pageRotation || next % 90 !== 0 || !pdfDocument) return;
+      const anchor = captureScrollAnchor();
+      pageRotation = next;
+      pageRecords.forEach(function (record) {
+        if (record.page) {
+          updateRecordGeometry(record, true); // keep the old bitmap visible while re-rendering
+        } else {
+          updatePlaceholderGeometry(record);
+        }
+      });
+      restoreScrollAnchor(anchor);
+      // Re-render everything that currently holds a bitmap. updateRecordGeometry
+      // already set rendered=false for pages whose size changed (every non-square
+      // page); square pages need the explicit kick below, and re-observing makes
+      // the IntersectionObserver re-report visible pages for the render pass.
+      pageRecords.forEach(function (record) {
+        if (record.canvas && record.canvas.width > 0 && !record.renderTask) {
+          record.rendered = false;
+          renderRecord(record);
+        }
+      });
+      if (pageObserver) {
+        pageRecords.forEach(function (record) { pageObserver.unobserve(record.element); });
+        pageRecords.forEach(function (record) { pageObserver.observe(record.element); });
+      }
     }
 
     function submitPdfPassword(password) {
@@ -915,8 +1026,8 @@
     window.searchPdf = searchPdf;
     window.showPdfSearchMatch = showPdfSearchMatch;
     window.gotoPdfPage = goToPdfPage;
-    window.setPdfNightMode = setPdfNightMode;
     window.setPdfZoom = setPdfZoom;
+    window.setPageRotation = setPageRotation;
     window.setPdfRenderScale = setPdfRenderScale;
     window.setPdfQualityBudget = setPdfQualityBudget;
     window.retryPdfPage = retryPage;

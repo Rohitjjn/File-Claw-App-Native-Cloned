@@ -107,14 +107,45 @@
             color: #ffffff !important;
             outline: 2px solid #e65100;
         }
-        .loading-banner {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 48px;
-            font-size: 15px;
-            font-weight: 500;
-            color: #888;
+        /* Loop 14: skeleton loading for the DOCX open path — neutral page-shaped
+           placeholders with a soft shimmer instead of a lone text line. The whole
+           #loading node is replaced as soon as renderAsync produces the document. */
+        .docx-skeleton {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 16px;
+            box-sizing: border-box;
+        }
+        .docx-skeleton-page {
+            background: var(--page-bg, #ffffff);
+            border: 1px solid rgba(25, 25, 25, .08);
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            padding: 26px 22px;
+            margin-bottom: 24px;
+            box-sizing: border-box;
+        }
+        body.dark .docx-skeleton-page {
+            --page-bg: #1e1e1e;
+            border-color: #333336;
+        }
+        .docx-skeleton-bar {
+            height: 10px;
+            border-radius: 5px;
+            background: rgba(25, 25, 25, .10);
+            margin-bottom: 12px;
+            animation: docx-skeleton-pulse 1.3s ease-in-out infinite;
+        }
+        body.dark .docx-skeleton-bar { background: rgba(255, 255, 255, .12); }
+        .docx-skeleton-bar.short { width: 42%; }
+        .docx-skeleton-bar.mid { width: 68%; }
+        .docx-skeleton-bar.wide { width: 100%; }
+        @keyframes docx-skeleton-pulse {
+            0%, 100% { opacity: .45; }
+            50% { opacity: .95; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .docx-skeleton-bar { animation: none; opacity: .6; }
         }
         .error-banner {
             padding: 20px;
@@ -140,7 +171,19 @@
 <body>
     <div id="viewport-wrapper">
         <div id="output">
-            <div id="loading" class="loading-banner">Rendering Word document...</div>
+            <div id="loading" class="docx-skeleton" role="status" aria-label="Rendering Word document">
+                <div class="docx-skeleton-page">
+                    <div class="docx-skeleton-bar short"></div>
+                    <div class="docx-skeleton-bar wide"></div>
+                    <div class="docx-skeleton-bar wide"></div>
+                    <div class="docx-skeleton-bar mid"></div>
+                </div>
+                <div class="docx-skeleton-page">
+                    <div class="docx-skeleton-bar mid"></div>
+                    <div class="docx-skeleton-bar wide"></div>
+                    <div class="docx-skeleton-bar short"></div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -265,6 +308,19 @@
                 if (window.Android.onDocumentTap) window.Android.onDocumentTap();
             }
         });
+
+        // ---------------------------------------------------------------------------
+        // Search state (Loop 14 regression fix): the Loop 12 rewrite dropped the
+        // declaration of maxSearchHighlights while searchWord() still READ it, so
+        // every query that actually matched threw ReferenceError and DOCX find never
+        // reported results. All five engine globals are declared explicitly now
+        // (mirroring the generated TXT/MD preview script and the Loop 10 cap of 5000).
+        // ---------------------------------------------------------------------------
+        let maxSearchHighlights = 5000;
+        let searchMatches = [];
+        let currentMatchIdx = -1;
+        let totalSearchMatches = 0;
+        let searchMatchesTruncated = false;
 
         function notifySearchCount() {
             if (window.Android && window.Android.onSearchResultCount) {
