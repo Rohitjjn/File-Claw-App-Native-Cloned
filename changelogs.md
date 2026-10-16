@@ -15,6 +15,44 @@ Next Review Date: January 15, 2027
 - Example: `v1.2.4` (Major 1, Minor 2, Patch 4).
 
 ## 3. Unreleased Changes (pending device verification)
+**Version:** v1.3.2 (pending — recommended branch `v1.3.2`; the Gradle `versionName` stays `1.3.0` until the APK built by the `Build and Release` workflow is device-tested; the workflow's version input carries the release identity so no inconsistent numbers ship)
+**Date:** October 16, 2026
+**Change Type:** `[FIXED]` / `[ADDED]` / `[CHANGED]` / `[PERFORMANCE]`
+**Verification status:** Kotlin compilation, unit tests and APK assembly NOT run in the patch environment (no Android SDK/JDK); delegated to GitHub Actions (`build-and-release.yml`). `node --check` passed for every edited inline script (search.html classic + module, docx_editor.html), HTML structure checks passed, and the brace/paren balance of every edited Kotlin file matches the pristine baseline exactly. Device behaviors below are implemented but not yet hardware-verified.
+
+**[FIXED]**
+- **Affected:** `ui/screens/FilePreviewScreen.kt`, `ui/screens/DocumentPreviewSupport.kt`, `src/test/java/com/example/ui/screens/InViewerSearchCommandPolicyTest.kt` (new)
+- **Description:** In-document search arrows could never walk past match #2 (reported as "7 results, arrows reach only 2–3"). Root cause (proven by code path): the DOCX and TXT/MD WebView effects re-issued `searchWord()` on EVERY arrow press; `searchWord()` rebuilds the highlight list and resets the renderer's active index to 0, so the appended next/prev call always advanced from index 0 to 1 — the counter was stuck at 2/N while the list itself was complete. Navigation now goes through the new pure `InViewerSearchCommandPolicy`: a query is searched exactly once, arrow presses issue ONLY next/prev deltas, and trigger-counter resets (file switch / find closed) are absorbed instead of replayed. The PDF pipeline (Kotlin-owned index + wrap in `InViewerSearchNavigation`) was audited and already correct. Seven new unit tests prove all N matches are reachable in both directions with wrap-around.
+- **Author:** Loop 12 senior-agent team
+- **Affected:** `assets/pdfjs/search.html`, `core/format/PdfCanvasDimensionPolicy.kt` (new), `src/test/java/com/example/core/format/PdfCanvasDimensionPolicyTest.kt` (new)
+- **Description:** Very large pages (posters, blueprints, CAD exports) rendered permanently blank: the render-ratio floor of 1.0 and the missing per-dimension cap let the backing canvas exceed Chromium's internal canvas limits, after which the browser silently ignores every draw command. The new `PdfCanvasDimensionPolicy` clamps the ratio by the per-page pixel budget AND an 8192px per-dimension ceiling, with a 0.05 floor so oversized pages downsample into a legal canvas instead of blanking; the reader mirrors it in `renderPixelRatio()`. Nine unit tests including a sweep proving no canvas dimension can exceed the cap.
+- **Author:** Loop 12 senior-agent team
+- **Affected:** `assets/pdfjs/search.html`, `core/format/PdfDarkModePolicy.kt` (new), `src/test/java/com/example/core/format/PdfDarkModePolicyTest.kt` (new)
+- **Description:** Dark mode no longer inverts every non-"photo" page. A CSS filter on the single page canvas cannot selectively invert text while preserving an embedded image, and the old saturation-only heuristic ghosted grayscale/low-saturation portraits. Pages are now classified after every render: ONLY confidently near-binary text pages (≤1.5% colorful, ≤12% continuous-tone, ≥55% light pixels) are inverted; color photos, grayscale portraits, mixed pages, charts, scans and diagrams keep their original colors, slightly dimmed. Failure direction is now "a page stays lighter than ideal", never "a portrait becomes a negative". Thresholds mirror `PdfDarkModePolicy` (14 unit tests).
+- **Author:** Loop 12 senior-agent team
+
+**[CHANGED]**
+- **Affected:** `assets/pdfjs/search.html`, `core/format/PdfRenderBudgetPolicy.kt`, `ui/screens/FilePreviewScreen.kt`, `src/test/java/com/example/core/format/PdfRenderBudgetPolicyTest.kt`
+- **Description:** `setPdfQualityBudget` now receives the TOTAL RGBA budget across simultaneously resident canvases (`totalCanvasBytes` = per-page budget × 3-page resident window × 4 bytes) instead of a per-page number that ignored multi-page residency inside the prefetch window; the reader derives the per-page budget from it (Loop 10 device tiers still hold per page). A resident-window LRU keeps at most 3 canvases rendered, releasing the least-recently-rendered non-visible page first; released pages also drop their `PDFPageProxy` with `page.cleanup()` so worker-side operator lists and decoded images do not accumulate over a 100+ page session.
+- **Author:** Loop 12 senior-agent team
+- **Affected:** `assets/editor/docx_editor.html`, `ui/screens/FilePreviewScreen.kt`
+- **Description:** DOCX zoom is now two-phase (the pdf.js-viewer pattern): per-frame pinch previews apply a compositor-only `transform: scale()` (no layout pass), throttled to ~30 dispatches/s; the authoritative CSS `zoom` commit happens once on gesture settle (restoring the relative scroll offset), while toolbar +/-, the percentage dialog and page load commit immediately with a 260ms in-page backstop. Removes the per-frame whole-document style→layout→paint pass that made pinch zoom feel unreliable on large documents.
+- **Author:** Loop 12 senior-agent team
+- **Affected:** `assets/editor/docx_editor.html`, `ui/screens/FilePreviewScreen.kt`
+- **Description:** DOCX bytes now stream to docx-preview through the WebViewAssetLoader (`/docx-src/document.docx`, same mechanism as the PDF reader) as exactly one ArrayBuffer, replacing the base64 String that crossed the JS bridge and peaked at ~5 simultaneous copies of large files; the bridge base64 path is kept as an in-page fallback if the streamed fetch fails.
+- **Author:** Loop 12 senior-agent team
+
+**[PERFORMANCE]**
+- **Affected:** `assets/pdfjs/search.html`
+- **Description:** Large-PDF lifecycle rework: document open now fetches ONLY page 1 up front and builds sized placeholders for the rest (official pdf.js-viewer pattern) instead of awaiting one sequential `getPage()` per page before `onPdfDocumentLoaded`; real page proxies are fetched when a page approaches the viewport and dropped (with cleanup) when released; extracted search text is LRU-capped at 128 pages instead of duplicating the whole document in memory; a failed page render shows a local retry affordance instead of staying permanently blank; WebView renderer death is handled with a Try Again rebuild (PDF) or text-only fallback (DOCX); preview WebViews are destroyed deterministically on composition release.
+- **Author:** Loop 12 senior-agent team
+
+**[ADDED]**
+- **Affected:** `core/format/PdfCanvasDimensionPolicy.kt`, `core/format/PdfDarkModePolicy.kt`, `ui/screens/DocumentPreviewSupport.kt` (`InViewerSearchCommandPolicy`), plus their three new test classes
+- **Description:** Three pure, unit-tested policies introduced this loop: canvas dimension/area clamps, dark-mode tone classification, and WebView find-bar command planning. Static `@Test` count baseline at loop start was 167; 30 methods were added (9 + 14 + 7).
+- **Author:** Loop 12 senior-agent team
+
+## 4. v1.3.1 (shipped — uploaded to branch `v1.3.1`, merged to `main` in PR #26, tag `v10.0.4`; device testing of that build produced the Loop 12 issue reports)
 **Version:** v1.3.1 (pending — branch `v1.3.1`; the Gradle `versionName` stays `1.3.0` until the APK built by the `Build and Release` workflow is device-tested; the workflow's version input carries the release identity so no inconsistent numbers ship)
 **Date:** October 16, 2026
 **Change Type:** `[FIXED]` / `[ADDED]` / `[CHANGED]`
@@ -59,7 +97,7 @@ Next Review Date: January 15, 2027
 - **Description:** Loop 10 documentation: structured worklog entry `LOOP10-SEARCH-IME-ZOOM` (per-persona audit findings, evidence, true check outcomes, device-pending list), Loop 10 known-issue watchlist, TODO loop section, and the replacement next-loop prompt. Patch ZIP contains only the changed files at repository-relative paths (no APK, no build output, no temporary scripts).
 - **Author:** Loop 10 senior-agent team
 
-## 4. Current Version Section
+## 5. Current Version Section
 **Current Version:** v1.3.0
 **Release Date:** October 15, 2026
 **Total Changes:** Search experience overhaul (relevance-ranked global search, match highlighting, themed in-viewer search bar, keyboard actions, WebView re-highlight debounce) + PDF reader fixes (crisp pinch re-rasterization like Google Drive, smart dark mode that keeps photos natural, smooth focus-mode transition) + DOCX upgrades (opens at 40% zoom, pinch-to-zoom, double-tap 40%⇄100% toggle, persisted zoom). Dedicated tests are included for the new pure-Kotlin policies. This repository integration has not been build/test-verified here; Android APK assembly remains delegated to GitHub Actions.
@@ -77,7 +115,7 @@ Next Review Date: January 15, 2027
 **Issues In Progress:**
 - See `known-issues.md`; next-loop prompt lives at `docs/prompts/NEXT_LOOP_PROMPT.md`.
 
-## 5. Version History
+## 6. Version History
 
 ### [v1.3.0] - Search Polish, PDF Reader Fixes & DOCX Zoom (2026-10-15)
 **[ADDED]**
@@ -229,7 +267,7 @@ Next Review Date: January 15, 2027
 - CSV parsing and tabular viewing.
 - Basic Text Editing and Saving capabilities.
 
-## 6. Change Entry Template
+## 7. Change Entry Template
 All upcoming pulls or changes MUST map to this template:
 
 ```markdown
@@ -241,17 +279,17 @@ All upcoming pulls or changes MUST map to this template:
 - **[BREAKING]** (If applicable): Migration details.
 ```
 
-## 7. Update Rules
+## 8. Update Rules
 - **When**: MUST be updated before any branch merge into `main` or `release`.
 - **Who**: The developer executing the change.
 - **Review**: Required during PR code review.
 
-## 8. User-Facing Changelog
+## 9. User-Facing Changelog
 - Derive user notes by ignoring `[REFACTOR]` and technical `[FIXED]` entries.
 - Focus on `[ADDED]` features and user-reported `[FIXED]` items.
 - Example User Note: "Added support for viewing password-protected PDFs!"
 
-## 9. Rollback Log
+## 10. Rollback Log
 *No rollbacks recorded yet.*
 
 ---

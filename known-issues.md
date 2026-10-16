@@ -22,10 +22,13 @@ Next Review Date: January 15, 2027
 | BUG-003 | PDF Zoom Reset on Rotation | MEDIUM| OPEN| `UI`| Activity recreation loses `pdfScale` bounds. |
 | BUG-004 | CSV Table Horizontal Scroll | LOW| OPEN| `UI`| Extreme widths cause minor clipping on strict bounds. |
 | BUG-005 | Password Field Obscuring | LOW| OPEN| `UI`| Keyboard overlaps the unlock dialog on small screens. |
+| BUG-006 | PDF placeholder geometry estimated from page 1 | LOW | OPEN (Loop 12 watchlist) | `PDF_ENGINE` | Very large PDFs open instantly now, but page placeholders use page 1's size until each real page is fetched; mixed-orientation documents can shift layout slightly on first approach. Same tradeoff as the official pdf.js viewer. |
+| BUG-007 | DOCX pinch preview can transiently overflow horizontally | LOW | OPEN (Loop 12 watchlist) | `UI` | During an active pinch the DOCX zoom preview uses `transform: scale()` (no layout), so wide documents may visually overflow the scroll area mid-gesture; the settle commit restores correct scrolling and scroll position. |
+| BUG-008 | HTML preview has no next/prev match navigation | LOW | OPEN | `UI` | HTML files use `findAllAsync` only (highlight, no arrow navigation). Not part of the Loop 12 scope (PDF/DOCX/TXT/MD were audited); needs its own pipeline if wanted. |
 
 ### Loop 8 watchlist
-- **PDF crisp-zoom memory**: the per-page 9M-pixel budget (~36MB ARGB) bounds memory, but very long sessions at 5× zoom on low-RAM devices may still pressure the heap; `releaseRecord` frees offscreen pages (monitor via `dumpsys meminfo`).
-- **PDF smart-dark classification threshold**: the 4% saturated-pixel cutoff is a heuristic; pages that mix large photos WITH body text invert the photos only if the text dominates. Tunable in `classifyPage()` (`assets/pdfjs/search.html`).
+- **PDF crisp-zoom memory**: SUPERSEDED by the Loop 12 residency model — the reader now receives a TOTAL RGBA budget across at most 3 resident canvases (per-page tiers unchanged); see the Loop 12 watchlist below.
+- **PDF smart-dark classification threshold**: SUPERSEDED in Loop 12 by `PdfDarkModePolicy` (near-binary text detection); see the Loop 12 watchlist below.
 - **DOCX pinch vs text selection**: 2-finger gestures are consumed at the Initial pass; long-press selection inside the rendered DOCX is unaffected, but exotic WebView widgets may need per-case validation.
 - **Search ranking is name-only**: global search still matches file NAMES, not contents; content search is planned (see `docs/prompts/NEXT_LOOP_PROMPT.md`).
 
@@ -37,7 +40,22 @@ Next Review Date: January 15, 2027
 - **Back closes find first**: deliberate Chrome-style behavior added in Loop 10; if any flow expected back to leave the document while find is open, revisit before promoting v1.3.1 to stable.
 - **PDF blank-flash**: re-renders now swap an offscreen canvas on completion; confirm no flicker remains on slow devices where the settle re-render takes >300ms (the old bitmap stays visible meanwhile by design).
 
+### Loop 12 watchlist (all items implemented; NOT yet device-verified)
+- **PDF lazy open + residency**: very large PDFs (100+ pages) should open in roughly constant time and stay bounded in memory (`dumpsys meminfo` before/after a 200-page scroll session; logcat for renderer kills). Page revisits re-fetch the page proxy — confirm scrolling back feels instant on a mid-range phone.
+- **Resident window = 3**: if users report visible blank gaps while flipping pages quickly, raise `residentPageWindow` in `search.html` together with `PdfRenderBudgetPolicy.RESIDENT_PAGE_WINDOW` (they must stay in sync) and re-measure memory.
+- **Search arrows**: verify with a 7-match document (the original report) in DOCX, TXT, MD and PDF — every press must move the counter 1→7 and wrap in both directions.
+- **Dark mode decision**: text pages invert deep as before; photo pages/portraits/charts now stay natural and slightly dimmed. If the dim level feels wrong, tune `brightness()` in the `.pdf-page.natural` CSS rule only — never re-enable blanket inversion.
+- **DOCX two-phase zoom**: pinch should track the fingers smoothly (transform preview) and settle crisply (one CSS zoom commit); watch for the settle commit feeling delayed on very slow devices (backstop is 260ms). The percentage chip updates live during the pinch.
+- **DOCX streamed bytes**: open DOCX from storage AND from inside a zip; if `/docx-src/document.docx` ever fails, the page falls back to the base64 bridge automatically — confirm the fallback path still renders.
+- **Renderer-crash recovery**: hard to trigger deliberately; if the PDF viewer ever shows "The PDF renderer stopped unexpectedly.", the Try Again button must rebuild it (and DOCX must fall back to Clean Document View).
+
 ## 4. Recently Fixed Issues
+- **Search arrows stopped at 2–3 of N matches (user-reported, Loop 12)**: the DOCX and TXT/MD WebView search effects re-ran `searchWord()` on every arrow press, which resets the renderer's active match index to 0 before advancing one step — the counter could never move past 2 regardless of the real match count. *Fix*: pure `InViewerSearchCommandPolicy` plans the commands (query searched once, arrows issue only next/prev deltas, counter resets absorbed); 7 unit tests prove all N matches reachable both directions (`FilePreviewScreen.kt`, `DocumentPreviewSupport.kt`). *Device verification pending.*
+- **Very large PDF pages rendered permanently blank (user-reported via "struggling with large PDFs", Loop 12)**: the render-ratio floor of 1.0 plus missing per-dimension cap let oversized canvases exceed Chromium's silent canvas limits. *Fix*: `PdfCanvasDimensionPolicy` — area budget AND 8192px per-dimension cap, 0.05 floor, downsampling instead of blanking; mirrored in `renderPixelRatio()`.
+- **Heavy PDFs ballooned memory / opened slowly (user-reported, Loop 12)**: every page was fetched up front and retained forever; extracted search text duplicated the whole document; 3–5 canvases could be resident against a per-page-only budget. *Fix*: lazy placeholder open (page 1 only), `page.cleanup()` + proxy drop on release, resident-window LRU (max 3 canvases), total-RGBA budget across residents, 128-page text LRU (`search.html`, `PdfRenderBudgetPolicy.totalCanvasBytes`). *Device verification pending.*
+- **Dark mode made human photos look like negatives (user-reported, Loop 12)**: whole-canvas inversion guarded only by a saturation heuristic ghosted grayscale/low-saturation portraits. *Fix*: invert ONLY confidently near-binary text pages; everything else keeps original colors slightly dimmed (`PdfDarkModePolicy` + per-render classifier). *Device verification pending.*
+- **DOCX pinch zoom lagged then jumped on large documents (user-reported, Loop 12)**: every gesture frame applied CSS `zoom`, forcing a full style→layout→paint of the entire rendered document. *Fix*: compositor-only `transform: scale()` preview during the pinch (throttled ~30/s) + one authoritative CSS `zoom` commit on settle with scroll restore (`docx_editor.html` two-phase zoom).
+- **Large DOCX open memory spikes (code-path evidence, Loop 12)**: the base64 bridge path peaked at ~5 simultaneous copies of the file. *Fix*: bytes stream through WebViewAssetLoader as one ArrayBuffer (`/docx-src/document.docx`); bridge path kept as in-page fallback.
 - **Light-mode status bar icons invisible (user-reported, Loop 7)**: `enableEdgeToEdge()` set icon appearance from the system dark-mode flag once, while the canvas followed the in-app theme. *Fix*: `FilesClawTheme` now re-asserts `isAppearanceLightStatusBars/NavigationBars` on the host window whenever the in-app theme resolves (`ui/theme/Theme.kt`).
 - **Preview top bar duplicated the bottom tray (user-reported, Loop 7)**: Search/Outline/Focus/Copy icons were stacked in the top bar. *Fix*: top bar reduced to back + file name + 3-dot menu.
 - **Document Outline / Viewer Appearance menu items dead (user-reported, Loop 7)**: flags were set but the bottom sheets were never rendered. *Fix*: both sheets are now wired (outline jump + theme/font/zoom appearance).
@@ -68,6 +86,8 @@ Next Review Date: January 15, 2027
 ## 8. Won't Fix / By Design
 - **DOCX Formatting Loss**: Custom parser strictly isolates text. Retaining word-perfect structural formatting (images, fonts, alignments) is `BY_DESIGN` ignored to keep the app lightweight and avoid bloated Apache POI imports.
 - **No Cloud Sync**: App is marketed and designed as purely offline file manager. Network APIs are excluded intentionally.
+- **Dark mode: mixed text+photo pages stay light (Loop 12)**: a single page canvas cannot selectively invert text around an embedded image. Only near-binary text pages invert; mixed pages keep original colors slightly dimmed. Inverting them would re-introduce the ghosted-portrait bug — this is the accepted tradeoff.
+- **Tile rendering at extreme PDF zoom (Loop 12)**: a bounded viewport/tile design exists on paper but cannot be verified (tile coordinates, scroll/highlight/cleanup interplay) without a device; shipping a partial tile implementation is explicitly out of scope. Whole-page rendering with dimension caps remains the shipped behavior — see `docs/prompts/NEXT_LOOP_PROMPT.md` backlog.
 
 ## 9. Issue Triage Rules
 - Users/QA submit items mapped to the BUG format.

@@ -38,6 +38,28 @@ object PdfRenderBudgetPolicy {
         else -> 9_000_000L
     }
 
+    /**
+     * Loop 12: how many pages may keep a rendered canvas at the same time. The Loop 10
+     * budget treated every page as if it were the only resident canvas; with the
+     * ~900px IntersectionObserver prefetch window 3-5 pages can be resident at once,
+     * so a 12M-pixel budget meant 144-192MB of live RGBA buffers — exactly why heavy
+     * PDFs struggled. The reader now keeps at most this many pages rendered and
+     * releases the least-recently-rendered non-visible page first.
+     */
+    const val RESIDENT_PAGE_WINDOW = 3
+
+    /** RGBA bytes per backing pixel. */
+    const val BYTES_PER_PIXEL = 4
+
+    /**
+     * Total RGBA budget across all simultaneously resident page canvases. The reader
+     * divides this by [RESIDENT_PAGE_WINDOW] x [BYTES_PER_PIXEL] to recover the
+     * per-page pixel budget, so the Loop 10 device tiers still hold per page while
+     * the aggregate stays bounded on every device.
+     */
+    fun totalCanvasBytes(isLowRamDevice: Boolean, memoryClassMb: Int?): Long =
+        budgetPixels(isLowRamDevice, memoryClassMb) * RESIDENT_PAGE_WINDOW * BYTES_PER_PIXEL
+
     /** Clamps any externally supplied budget into the safe range. */
     fun coerceBudget(pixels: Long): Long = pixels.coerceIn(MIN_BUDGET_PIXELS, MAX_BUDGET_PIXELS)
 }

@@ -1,55 +1,66 @@
-# File Claw — NEXT LOOP PROMPT (Loop 11)
+# File Claw — NEXT LOOP PROMPT (Loop 13)
 
-> **Scope:** v1.3.1 device-testing round — verify and polish the Loop 10 viewer fixes (header find bar, IME-aware edit tray, DOCX pinch gate, PDF sharp re-render) across PDF, DOCX, TXT and Markdown. User tests the APK built by GitHub Actions from branch `v1.3.1` and reports real-device bugs; fix those FIRST, then pull from the improvement backlog below.
+> **Scope:** v1.3.2 device-testing round — verify the Loop 12 fixes on real hardware first (search arrows, heavy-PDF lifecycle, dark-mode classifier, two-phase DOCX zoom, streamed DOCX bytes), then pull from the improvement backlog. User tests the APK built by GitHub Actions from branch `v1.3.2` and reports real-device bugs; fix those FIRST.
 > **Golden rule:** 100% offline. No new network code, no cloud calls, no heavy new dependencies without measuring APK impact.
 
 ---
 
 ## PART 0 — Working protocol (senior agents team)
 
-1. Clone/refresh the repo, read in order: `worklog.md` (Loop 10 entry `LOOP10-SEARCH-IME-ZOOM`), `PATCH_NOTES_LOOP10.md`, `changelogs.md` (unreleased section), `known-issues.md` (Loop 10 watchlist), `docs/TODO.md`, `rules.md`, `tech-specs.md`, `BUILD_GUIDE.md`.
-2. Establish the REAL test baseline from the current checkout/CI before touching anything (static count at Loop 10 start was 167 `@Test` methods + 21 added by Loop 10 = 188; never trust the stale 134/146 figures).
-3. Run the audit team FIRST (research-only, sequential if parallel sub-agents are unavailable; label reports individually):
-   - Agent A: viewer search sweep — header find bar across all four formats + WebView pipelines (`DocumentPreviewSupport.kt`, `assets/pdfjs/search.html`, `assets/editor/docx_editor.html`), stale-highlight/count edge cases after Loop 10.
-   - Agent B: PDF pipeline — `setPdfQualityBudget` behavior on real devices (`dumpsys meminfo`, logcat renderer kills), `renderedRatio` swap path, focus-mode/rotation resize debounce.
-   - Agent C: DOCX + IME — `PinchGestureGate` feel on hardware, fallback control hiding, `safeDrawing.bottom` tray behavior with gesture vs three-button nav.
-4. Implement, run the quality gate (PART 4), deliver a **patch zip with only updated files** (repo-relative paths, upload-ready to GitHub). APK compile happens via GitHub Actions — do NOT ship an APK.
+1. Clone/refresh the repo, record remote URL, default branch, current branch, HEAD SHA, open PRs with head/base SHAs. Verify the CURRENT state of `main`, `v1.3.1` and any `v1.3.2` branch instead of assuming; previous loops mentioned draft PR #22 (superseded, leave alone) and merges via PR #26 (tag v10.0.4).
+2. Read in order: `worklog.md` (Loop 12 entry `LOOP12-DOCX-SEARCH-PDF-DARK-PERF`), `PATCH_NOTES_LOOP12.md`, `changelogs.md` (unreleased v1.3.2 section), `known-issues.md` (Loop 12 watchlist + BUG-006/007/008), `docs/TODO.md`, `rules.md`, `tech-specs.md`, `BUILD_GUIDE.md`.
+3. Establish the REAL test baseline from the current checkout/CI before touching anything (static count at Loop 12 start was 167 `@Test` methods; Loop 12 added 30 → expect 197 in CI; never trust the stale 134/146/188 figures).
+4. Run the audit team FIRST (research-only; label reports individually if run sequentially as virtual audits):
+   - Agent A: search sweep — confirm `InViewerSearchCommandPolicy` wiring in both WebView effects, PDF snapshot index sync after Loop 12, HTML (`findAllAsync`) gap (BUG-008).
+   - Agent B: PDF lifecycle — `dumpsys meminfo` before/after a 200-page scroll session, renderer-kill logcat scan, revisit-after-release latency, resident-window behavior.
+   - Agent C: DOCX — two-phase zoom feel on a 100+ page document, settle-commit timing, streamed `/docx-src/document.docx` path plus fallback, fallback renderer regression check.
+5. Implement, run the quality gate (PART 4), deliver a **patch zip with only updated files** (repo-relative paths, upload-ready to GitHub). APK compile happens via GitHub Actions — do NOT ship an APK.
 
-## PART 1 — User-reported bug fixes (fill after device testing of the v1.3.1 branch)
+## PART 1 — Device verification checklist for the Loop 12 build (gate before any new work)
+
+- [ ] **Search arrows (the original "7 results, arrows reach only 2–3")**: a 7-match document in DOCX, TXT, MD and PDF — next walks 1→7 and wraps, previous walks 7→1 and wraps; mid-typing navigation never re-searches; closing find clears counts.
+- [ ] **Heavy PDF**: open a 200+ page document (time to interactive), scroll to page ~200, scroll back, zoom 2×/3×, search a common word; `dumpsys meminfo` before/after must show bounded growth; no renderer kills in logcat.
+- [ ] **Very large page**: poster/blueprint PDF renders (downsampled), never blank.
+- [ ] **Dark mode**: color portrait, grayscale portrait, low-saturation portrait, mixed text+photo, chart, B/W scan, text-only page — portraits must NEVER look like negatives; text pages still invert deep.
+- [ ] **DOCX zoom**: pinch on a 100+ page DOCX tracks fingers smoothly (no lag spike, no jump), settles crisply, chip updates live; toolbar +/- and percent dialog still instant; double-tap toggle works; zoom >100% keeps horizontal scrolling.
+- [ ] **DOCX open**: large DOCX (10–20 MB) opens without memory spikes; DOCX from inside a zip still opens (streamed path + fallback).
+- [ ] **Renderer-crash recovery** (if triggerable): PDF error state shows Try Again which rebuilds; DOCX falls back to Clean Document View.
+- [ ] **Loop 10 regressions still green**: header find bar, IME edit tray, back-closes-find, fallback zoom controls hidden, PDF sharp settle re-render.
+
+## PART 2 — User-reported bug fixes (fill after device testing of the v1.3.2 branch)
 
 - [ ] BUG-USER-1: ______ (report verbatim → root-cause → fix → regression note)
 - [ ] BUG-USER-2: ______
 - [ ] BUG-USER-3: ______
 
-Known watch items from Loop 10 (verify on device, fix if confirmed):
-- PDF sharpness on a dpr≈3 device at 2×/3× after the budget raise (16M tier); if a device class still blurs or the renderer is killed at 5×, investigate **viewport/tile rendering** (bounded strategy), do NOT simply remove caps.
-- DOCX pinch start latency: the gate skips exactly one transition event per finger-count change; confirm it is imperceptible and that adding/removing a finger mid-pinch does not jump the zoom.
-- Edit tray with three-button navigation in landscape and large-font mode (union inset must not double-pad).
-- Back-closes-find-first interaction: confirm no flow expected back to leave the document while find is open.
-- DOCX fallback renderer: zoom controls are hidden there by design; if users want zoom in fallback mode, implement it in the fallback text view instead of re-enabling dead controls.
+Known watch items from Loop 12 (see `known-issues.md` Loop 12 watchlist; fix if confirmed):
+- BUG-006: mixed-orientation PDFs get page-1-estimated placeholders — if the shift on first approach is noticeable, fetch real geometry for the first N pages of each distinct size instead of all pages.
+- BUG-007: DOCX pinch preview transiently overflows horizontally mid-gesture — if it bothers users, clamp the preview transform horizontally or sync wrapper min-width during preview.
+- Resident window 3 too tight on fast flips → raise `residentPageWindow` in `search.html` AND `PdfRenderBudgetPolicy.RESIDENT_PAGE_WINDOW` together (keep the mirror exact), re-measure memory.
+- Dark mode dim level (`brightness(.9)` on `.pdf-page.natural`) — tune only there; never re-enable blanket inversion.
 
-## PART 2 — Improvement backlog (proposal ranking by the Loop 10 lead; keep scope on PDF/DOCX/TXT/MD unless the user expands it)
+## PART 3 — Improvement backlog (ranked by the Loop 12 lead)
 
-1. **PDF tile rendering at extreme zoom** (impact: high, risk: medium, testable: unit-testable tile scheduler + device memory probes). Render only the visible viewport region at full backing density above a zoom threshold (e.g. >3×), instead of whole pages, so sharpness is no longer bounded by the per-page budget. Grounded in: `desiredPixelRatio()` clamp is the only thing between long documents and OOM at 5×.
-2. **Search-in-file contents for global search** (impact: high, risk: medium, testable: extend `TextFileSearchEngine` + `FileSearchRanker`). Rank files by match count with the existing bounded-memory streaming engine; reuse the Loop 10 header find bar for opening the first hit.
-3. **Match-count parity audit across the four pipelines** (impact: medium, risk: low, testable: pure logic). DOCX navigable cap is 5,000, TXT/MD 1,000, PDF stores 2,000 page targets — extract these caps into one tested policy object so the displayed total and the navigable count can never drift apart.
-4. **Focus-mode IME regression guard** (impact: low, risk: low, testable: instrumentation-lite). Add a debug overlay/flag that logs inset values when the edit tray moves, to make the Loop 10 IME fix verifiable without a full UI-test dependency.
+1. **Bounded tile rendering at extreme PDF zoom** (impact: high, risk: medium, testable: pure tile-scheduler unit tests + device memory probes). Above a zoom threshold render only the viewport region at full backing density (pdf.js `enableDetailCanvas` is the reference design). Precondition: tile coordinates, scroll anchoring, highlight overlay mapping and cleanup verified on device — do NOT ship a partial tile implementation.
+2. **Match-count parity policy** (impact: medium, risk: low). DOCX navigable cap 5,000, TXT/MD 1,000, PDF stored 2,000 page targets — extract into one tested policy so displayed total vs navigable count can never drift; adds honest `3/7+` truncation labels if ever needed.
+3. **Content search in global search** (impact: high, risk: medium). Extend `TextFileSearchEngine` + `FileSearchRanker` to rank files by match count with bounded memory; reuse the header find bar to open the first hit.
+4. **HTML in-document search parity** (BUG-008): replace `findAllAsync`-only highlighting with the shared command-policy pipeline (next/prev + count badge) for HTML previews with scripts disabled-safe.
+5. **DOCX page-count/outline sheet**: outline bottom sheet for DOCX headings using the existing `DocumentOutlineBottomSheet`, reusing the page observer already present.
 
-## PART 3 — Non-goals
-
-- No new document-rendering dependencies; keep the bundled PDF.js / docx-preview / JSZip assets offline and pinned.
-- No redesign of the Claude-inspired visual language; no changes to formats outside PDF/DOCX/TXT/MD without explicit user approval.
-- Do not merge or auto-close Draft PR #22 from automation; PR decisions belong to the user after APK testing.
-
-## PART 4 — Quality gate
+## PART 4 — Quality gate (unchanged)
 
 ```bash
-chmod +x gradlew   # if needed after clone; keep the executable bit
+chmod +x ./gradlew
 ./gradlew :app:compileDebugKotlin --no-daemon
 ./gradlew :app:testDebugUnitTest --no-daemon
 ./gradlew :app:assembleDebug --no-daemon
 ```
 
-- Compare test counts with the CURRENT baseline (188 static `@Test` methods after Loop 10), not with 134/146.
-- Syntax-check every edited inline `<script>` with `node --check` (extract to a temp file; do not commit it).
-- Deliver: patch ZIP with only changed files at repository-relative paths, worklog entry, changelog entries in the mandatory format, and an honest pass/fail/not-run check report. Never fabricate green output.
+Also: `git diff --check`; extract modified inline JS to temp files and `node --check`; XML parse for manifest changes; verify the Actions run for the exact PR commit. Mark each `PASS`/`FAIL`/`NOT RUN` with real output. No fake green.
+
+## PART 5 — Non-goals
+
+- No renderer migration (docx-preview stays at its bundled version unless a migration is proven offline-safe: assets, minSdk, page layout, search, print/export, dark mode, APK size).
+- No AI models, server processing, external APIs or heavy libraries for dark mode or search.
+- Do not touch the DOCX viewer chrome (Claude-inspired header) or unrelated TXT/MD UI.
+- Never merge/publish a release without user approval; never modify `main` directly.
