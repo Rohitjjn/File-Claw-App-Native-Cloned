@@ -131,3 +131,12 @@ Residual risk: WebView Chromium CSS zoom and scroll anchoring need runtime verif
 - Rewired the existing PDF tray rotation icon to request portrait/landscape screen orientation from the host Activity; it no longer changes the PDF page's rotation state.
 - Removed four tracked Kotlin `.bak` files from app source/theme folders. They were editor backups, not source inputs; canonical Kotlin files remain unchanged.
 - Verification: GitHub source updates committed. Android compile/tests, CI and device orientation/gesture checks are NOT RUN in this environment.
+
+
+## Viewer reimplementation follow-up — 2026-10-17
+Branch: `feature/pdf-scrubber-docx-renderer-sensor-landscape-2026-10-17`.
+- Inspected the reference repository `Rohitjjn/File-Claw-native-` on main (`fc011789bc077b0b61c258b83b1c1b29e1be2fb9`). Its current `FilePreviewScreen.kt` uses AndroidPdfViewer's PDFView and does not contain a dedicated right-edge page scrubber implementation. Therefore an exact copy of that scroller is not available in the reference main branch; the cloned app's right-edge handle was instead corrected to keep the thumb within its track and map drag fraction to the existing PDF page-jump callback.
+- PDF tray orientation action now requests `SCREEN_ORIENTATION_SENSOR_LANDSCAPE` when entering landscape and `SCREEN_ORIENTATION_PORTRAIT` when returning. The existing WebView/document state is not explicitly recreated or reloaded by this action. Device-level no-glitch behavior is not yet verified.
+- DOCX preview zoom was changed to a transform-based visual scaling model, with wrapper scroll extent reserved explicitly, instead of CSS `zoom`. Existing native preview screen/tray/feature wiring was not redesigned.
+- Important: the DOCX renderer engine itself was NOT replaced with a different upstream library in this pass. The bundled `docx-preview` remains in use because replacing it without evaluating formatting fidelity, pagination, search and offline packaging could silently regress current features. Treat engine replacement as unresolved until a concrete alternative is validated.
+- Removed/changed code committed to this branch via GitHub source edits. Android build, tests, JavaScript syntax/runtime, CI and real-device checks are NOT RUN.
