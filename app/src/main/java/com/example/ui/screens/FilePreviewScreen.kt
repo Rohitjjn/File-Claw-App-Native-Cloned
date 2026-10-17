@@ -1240,7 +1240,7 @@ fun FilePreviewScreen(
                                                     if (activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
                                                         ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                                                     } else {
-                                                        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                                                     }
                                             }
                                         },
@@ -4268,7 +4268,7 @@ private fun PdfPageScrubber(
             modifier = Modifier
                 .width(if (isDragging) 64.dp else 44.dp)
                 .height(54.dp)
-                .offset(y = trackHeight * (if (isDragging) dragFraction else com.example.core.format.PdfRotationPolicy.fractionForPage(currentPage, pageCount)) - trackHeight / 2)
+                .offset(y = (trackHeight - 54.dp) * (if (isDragging) dragFraction else com.example.core.format.PdfRotationPolicy.fractionForPage(currentPage, pageCount)) - (trackHeight / 2 - 27.dp))
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Text(
