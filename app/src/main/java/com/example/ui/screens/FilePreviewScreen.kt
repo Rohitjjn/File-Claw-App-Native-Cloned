@@ -4240,95 +4240,57 @@ private fun PdfPageScrubber(
     onJumpRequest: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Self-contained drag state: fraction 0..1 along the rail, whether the thumb
-    // is currently held, and the page the thumb maps to right now.
     var isDragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
     val density = LocalDensity.current
-    val railHeight = 170.dp
-    val railHeightPx = with(density) { railHeight.toPx() }
+    val trackHeight = 300.dp
+    val trackHeightPx = with(density) { trackHeight.toPx() }
     val displayPage = if (isDragging) {
         com.example.core.format.PdfRotationPolicy.pageFromFraction(dragFraction, pageCount)
-    } else {
-        currentPage
-    }
-
-    fun fractionFromY(y: Float): Float = (y / railHeightPx).coerceIn(0f, 1f)
+    } else currentPage.coerceIn(1, pageCount.coerceAtLeast(1))
 
     Box(
         modifier = modifier
-            .width(44.dp)
-            .height(railHeight)
+            .width(52.dp)
+            .height(trackHeight)
             .semantics {
-                contentDescription =
-                    "Page scrubber. Drag to jump between pages. Page $displayPage of $pageCount."
+                contentDescription = "PDF page handle. Drag vertically to navigate. Page $displayPage of $pageCount."
             },
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.CenterEnd
     ) {
-        // Track: subtle rounded rail that widens slightly while grabbed.
-        Box(
+        // Screenshot-inspired edge tab: a compact page-number handle attached to
+        // the right screen edge, rather than the newer full-height rail/thumb.
+        Surface(
+            shape = RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.65f)),
+            shadowElevation = if (isDragging) 5.dp else 2.dp,
             modifier = Modifier
-                .width(if (isDragging) 8.dp else 5.dp)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color(0xFF191919).copy(alpha = if (isDragging) 0.30f else 0.18f))
-        )
-        // Thumb with the positional tick mark.
-        Box(
-            modifier = Modifier
-                .offset(y = railHeight * (if (isDragging) dragFraction else com.example.core.format.PdfRotationPolicy.fractionForPage(currentPage, pageCount)) - 11.dp)
-                .size(width = 22.dp, height = 22.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .background(
-                    if (isDragging) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
-                )
-                .shadow(if (isDragging) 4.dp else 2.dp, RoundedCornerShape(7.dp)),
-            contentAlignment = Alignment.Center
+                .width(if (isDragging) 64.dp else 44.dp)
+                .height(54.dp)
+                .offset(y = trackHeight * (if (isDragging) dragFraction else com.example.core.format.PdfRotationPolicy.fractionForPage(currentPage, pageCount)) - trackHeight / 2)
         ) {
-            Box(
-                Modifier
-                    .width(10.dp)
-                    .height(2.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color.White.copy(alpha = 0.9f))
-            )
-        }
-        // Page bubble while scrubbing: `current / total`, mirrors the page indicator.
-        if (isDragging) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
-                shadowElevation = 6.dp,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .offset(y = (-34).dp)
-            ) {
+            Box(contentAlignment = Alignment.Center) {
                 Text(
-                    text = "$displayPage / $pageCount",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    text = displayPage.toString(),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
-        // Gesture surface covers the whole rail area — an accessible hit target
-        // comfortably above the 48dp minimum, clear of the system gesture inset
-        // by the trailing padding applied by the caller.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(pageCount) {
+                .pointerInput(pageCount, trackHeightPx) {
                     detectDragGestures(
                         onDragStart = { offset ->
                             isDragging = true
-                            dragFraction = fractionFromY(offset.y)
+                            dragFraction = (offset.y / size.height).coerceIn(0f, 1f)
                         },
                         onDrag = { change, _ ->
                             change.consume()
-                            dragFraction = fractionFromY(change.position.y)
+                            dragFraction = (change.position.y / size.height).coerceIn(0f, 1f)
                         },
                         onDragEnd = {
                             val page = com.example.core.format.PdfRotationPolicy
