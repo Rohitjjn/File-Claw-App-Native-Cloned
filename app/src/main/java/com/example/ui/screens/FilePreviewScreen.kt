@@ -1,5 +1,11 @@
 package com.example.ui.screens
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -1224,18 +1230,25 @@ fun FilePreviewScreen(
                                         }
                                     }
 
-                                    // Loop 14: Rotate PDF view (occupies the Search button's
-                                    // former slot). Rotates the rendered document in 90-degree
-                                    // steps — pure viewer state, so the authenticated PDF.js
-                                    // document session is never reloaded and a password-protected
-                                    // file is never asked again.
+                                    // Screen orientation control: rotate the device UI between
+                                    // portrait and landscape. Never rotate the PDF page contents.
                                     IconButton(
-                                        onClick = { pdfViewRotation = com.example.core.format.PdfRotationPolicy.stepAfter(pdfViewRotation) },
+                                        onClick = {
+                                            val activity = context.findHostActivity()
+                                            if (activity != null) {
+                                                activity.requestedOrientation =
+                                                    if (activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                                                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                                    } else {
+                                                        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                                    }
+                                            }
+                                        },
                                         modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
                                             Icons.Outlined.RotateRight,
-                                            contentDescription = "Rotate PDF 90 degrees",
+                                            contentDescription = "Switch portrait/landscape screen orientation",
                                             modifier = Modifier.size(18.dp),
                                             tint = MaterialTheme.colorScheme.onSurface
                                         )
@@ -5355,3 +5368,13 @@ fun PptxPreviewWebView(
     }
 }
 
+
+/** Unwrap themed/Compose context wrappers to reach the host Activity for orientation requests. */
+private fun Context.findHostActivity(): Activity? {
+    var current: Context? = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return current as? Activity
+}
