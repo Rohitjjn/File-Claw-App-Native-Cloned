@@ -4242,6 +4242,7 @@ private fun PdfPageScrubber(
 ) {
     var isDragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
+    val density = LocalDensity.current
     val pageTotal = pageCount.coerceAtLeast(1)
     val fraction = if (isDragging) dragFraction else
         com.example.core.format.PdfRotationPolicy.fractionForPage(currentPage, pageTotal)
