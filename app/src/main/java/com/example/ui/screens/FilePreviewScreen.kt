@@ -4243,60 +4243,73 @@ private fun PdfPageScrubber(
     var isDragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
     val density = LocalDensity.current
-    val trackHeight = 300.dp
-    val trackHeightPx = with(density) { trackHeight.toPx() }
+    val pageTotal = pageCount.coerceAtLeast(1)
+    val fraction = if (isDragging) dragFraction else
+        com.example.core.format.PdfRotationPolicy.fractionForPage(currentPage, pageTotal)
     val displayPage = if (isDragging) {
-        com.example.core.format.PdfRotationPolicy.pageFromFraction(dragFraction, pageCount)
-    } else currentPage.coerceIn(1, pageCount.coerceAtLeast(1))
+        com.example.core.format.PdfRotationPolicy.pageFromFraction(dragFraction, pageTotal)
+    } else currentPage.coerceIn(1, pageTotal)
 
-    Box(
+    // Match the older native PDF scroll handle: a small page-number tab attached
+    // to the right edge, moving across the full usable viewer height. The touch
+    // target remains full-height so the user can grab it anywhere along the edge.
+    BoxWithConstraints(
         modifier = modifier
-            .width(52.dp)
-            .height(trackHeight)
+            .fillMaxHeight()
+            .width(64.dp)
             .semantics {
-                contentDescription = "PDF page handle. Drag vertically to navigate. Page $displayPage of $pageCount."
+                contentDescription = "PDF page scroller. Drag the right edge to navigate. Page $displayPage of $pageTotal."
             },
-        contentAlignment = Alignment.CenterEnd
+        contentAlignment = Alignment.TopEnd
     ) {
-        // Screenshot-inspired edge tab: a compact page-number handle attached to
-        // the right screen edge, rather than the newer full-height rail/thumb.
+        val handleHeight = 54.dp
+        val usableHeight = (maxHeight - handleHeight).coerceAtLeast(0.dp)
+        val handleY = usableHeight * fraction.coerceIn(0f, 1f)
+
         Surface(
             shape = RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.65f)),
-            shadowElevation = if (isDragging) 5.dp else 2.dp,
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.96f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.70f)),
+            shadowElevation = if (isDragging) 6.dp else 2.dp,
             modifier = Modifier
-                .width(if (isDragging) 64.dp else 44.dp)
-                .height(54.dp)
-                .offset(y = trackHeight * (if (isDragging) dragFraction else com.example.core.format.PdfRotationPolicy.fractionForPage(currentPage, pageCount)) - trackHeight / 2)
+                .align(Alignment.TopEnd)
+                .offset(y = handleY)
+                .width(if (isDragging) 64.dp else 52.dp)
+                .height(handleHeight)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Text(
-                    text = displayPage.toString(),
-                    fontSize = 16.sp,
+                    text = if (isDragging) "$displayPage / $pageTotal" else displayPage.toString(),
+                    fontSize = if (isDragging) 14.sp else 16.sp,
                     fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1
                 )
             }
         }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(pageCount, trackHeightPx) {
+                .pointerInput(pageTotal, maxHeight) {
                     detectDragGestures(
                         onDragStart = { offset ->
                             isDragging = true
-                            dragFraction = (offset.y / size.height).coerceIn(0f, 1f)
+                            val available = (size.height - with(density) { handleHeight.toPx() }).coerceAtLeast(1f)
+                            dragFraction = ((offset.y - with(density) { handleHeight.toPx() / 2f }) / available)
+                                .coerceIn(0f, 1f)
                         },
                         onDrag = { change, _ ->
                             change.consume()
-                            dragFraction = (change.position.y / size.height).coerceIn(0f, 1f)
+                            val available = (size.height - with(density) { handleHeight.toPx() }).coerceAtLeast(1f)
+                            dragFraction = ((change.position.y - with(density) { handleHeight.toPx() / 2f }) / available)
+                                .coerceIn(0f, 1f)
                         },
                         onDragEnd = {
-                            val page = com.example.core.format.PdfRotationPolicy
-                                .pageFromFraction(dragFraction, pageCount)
+                            val targetPage = com.example.core.format.PdfRotationPolicy
+                                .pageFromFraction(dragFraction, pageTotal)
                             isDragging = false
-                            onJumpRequest(page)
+                            onJumpRequest(targetPage)
                         },
                         onDragCancel = { isDragging = false }
                     )
