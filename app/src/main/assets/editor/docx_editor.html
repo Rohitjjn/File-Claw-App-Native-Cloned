@@ -31,10 +31,11 @@
         }
         /* The viewport is the horizontal scroller; vertical reading stays on the page. */
         #viewport-wrapper {
-            flex: 1;
             display: block;
+            position: relative;
             width: 100%;
             min-width: 0;
+            min-height: 100%;
             overflow-x: auto;
             overflow-y: visible;
             padding: 16px;
@@ -42,16 +43,17 @@
             overscroll-behavior-x: contain;
             -webkit-overflow-scrolling: touch;
         }
-        /* Do not scale the wrapper's width and the output's width at the same time.
-           The old 100%-wide output + wrapper min-width multiplier could double-count
-           zoom and left-align/clip the page on narrow screens. */
+        /* DOCX zoom is now transform-only: preserve the renderer's original page
+           layout and scale its visual layer. The wrapper receives explicit scaled
+           dimensions from commitZoom so vertical and horizontal scrolling match it. */
         #output {
             position: relative;
             width: max-content;
             min-width: 100%;
             max-width: none;
-            margin: 0;
+            margin: 0 auto;
             transform-origin: top left;
+            zoom: 1 !important;
         }
         .docx-wrapper {
             background: transparent !important;
@@ -236,39 +238,45 @@
             const viewport = document.getElementById("viewport-wrapper");
             if (!container || !viewport) return;
 
-            // Preserve the page nearest the top of the visible reading viewport, rather
-            // than scaling the document's global scrollTop ratio (which jumps to a
-            // different paragraph when document length changes after zoom).
             const pages = Array.from(container.querySelectorAll(".docx"));
-            const viewportTop = viewport.getBoundingClientRect().top;
-            let anchorPage = null;
-            let anchorOffset = 0;
+            const viewportRect = viewport.getBoundingClientRect();
+            let anchor = null;
+            let anchorTop = 0;
             for (const page of pages) {
                 const rect = page.getBoundingClientRect();
-                if (rect.bottom > viewportTop) {
-                    anchorPage = page;
-                    anchorOffset = rect.top - viewportTop;
+                if (rect.bottom > viewportRect.top) {
+                    anchor = page;
+                    anchorTop = rect.top;
                     break;
                 }
             }
-            const previousScrollLeft = viewport.scrollLeft;
-            container.style.transform = "";
-            container.style.zoom = String(factor);
-            // CSS zoom participates in layout, so the horizontal scroll range updates
-            // naturally. Do not multiply the wrapper width by the zoom a second time.
+
+            // Do not use CSS zoom: it changes layout metrics and has caused the
+            // preview width/height and Compose zoom state to diverge. Transform only
+            // the rendered layer, and explicitly reserve its scaled scroll extent.
+            container.style.zoom = "1";
+            container.style.transformOrigin = "top left";
+            container.style.transform = "scale(" + factor + ")";
+            const baseWidth = Math.max(container.scrollWidth, container.offsetWidth, viewport.clientWidth);
+            const baseHeight = Math.max(container.scrollHeight, container.offsetHeight);
+            viewport.style.minWidth = "0";
+            viewport.style.minHeight = Math.ceil(baseHeight * factor + 32) + "px";
+            container.style.width = Math.max(1, baseWidth) + "px";
+            viewport.style.setProperty("--docx-scaled-width", Math.ceil(baseWidth * factor) + "px");
+            viewport.style.overflowX = "auto";
+            // The transform doesn't affect normal flow, so keep enough layout space
+            // for the scaled output and make the horizontal range deterministic.
+            container.style.marginRight = Math.max(0, Math.ceil(baseWidth * (factor - 1))) + "px";
+
             requestAnimationFrame(function () {
-                viewport.scrollLeft = previousScrollLeft;
-                if (anchorPage && anchorPage.isConnected) {
-                    const nextOffset = anchorPage.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
-                    const pageDelta = nextOffset - anchorOffset;
-                    const documentScroller = document.scrollingElement || document.documentElement || document.body;
-                    if (documentScroller && Math.abs(pageDelta) > 0.5) {
-                        documentScroller.scrollTop += pageDelta;
-                    }
+                if (anchor && anchor.isConnected) {
+                    const nextTop = anchor.getBoundingClientRect().top;
+                    const delta = nextTop - anchorTop;
+                    const pageScroller = document.scrollingElement || document.documentElement || document.body;
+                    if (pageScroller && Math.abs(delta) > 0.5) pageScroller.scrollTop += delta;
                 }
             });
         }
-
         function setZoom(factor) {
             currentZoom = clampZoom(factor);
             displayZoom = currentZoom;
@@ -280,8 +288,9 @@
             displayZoom = clampZoom(factor);
             const container = document.getElementById("output");
             if (container) {
+                container.style.zoom = "1";
                 container.style.transform = "scale(" + displayZoom + ")";
-                container.style.transformOrigin = "top center";
+                container.style.transformOrigin = "top left";
             }
             if (zoomCommitTimer) window.clearTimeout(zoomCommitTimer);
             zoomCommitTimer = window.setTimeout(function () {
