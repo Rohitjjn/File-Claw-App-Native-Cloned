@@ -1240,7 +1240,7 @@ fun FilePreviewScreen(
                                                     if (activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
                                                         ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                                                     } else {
-                                                        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                                                     }
                                             }
                                         },
