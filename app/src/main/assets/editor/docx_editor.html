@@ -29,17 +29,29 @@
             overflow-x: auto;
             -webkit-text-size-adjust: 100%;
         }
+        /* The viewport is the horizontal scroller; vertical reading stays on the page. */
         #viewport-wrapper {
             flex: 1;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
+            display: block;
+            width: 100%;
+            min-width: 0;
+            overflow-x: auto;
+            overflow-y: visible;
             padding: 16px;
             box-sizing: border-box;
+            overscroll-behavior-x: contain;
+            -webkit-overflow-scrolling: touch;
         }
+        /* Do not scale the wrapper's width and the output's width at the same time.
+           The old 100%-wide output + wrapper min-width multiplier could double-count
+           zoom and left-align/clip the page on narrow screens. */
         #output {
-            width: 100%;
-            max-width: 900px;
+            position: relative;
+            width: max-content;
+            min-width: 100%;
+            max-width: none;
+            margin: 0;
+            transform-origin: top left;
         }
         .docx-wrapper {
             background: transparent !important;
@@ -221,22 +233,40 @@
 
         function commitZoom(factor) {
             const container = document.getElementById("output");
-            if (!container) return;
-            const scroller = document.scrollingElement || document.documentElement || document.body;
-            const previousTop = scroller ? scroller.scrollTop : 0;
-            const previousHeight = scroller ? Math.max(1, scroller.scrollHeight) : 0;
+            const viewport = document.getElementById("viewport-wrapper");
+            if (!container || !viewport) return;
+
+            // Preserve the page nearest the top of the visible reading viewport, rather
+            // than scaling the document's global scrollTop ratio (which jumps to a
+            // different paragraph when document length changes after zoom).
+            const pages = Array.from(container.querySelectorAll(".docx"));
+            const viewportTop = viewport.getBoundingClientRect().top;
+            let anchorPage = null;
+            let anchorOffset = 0;
+            for (const page of pages) {
+                const rect = page.getBoundingClientRect();
+                if (rect.bottom > viewportTop) {
+                    anchorPage = page;
+                    anchorOffset = rect.top - viewportTop;
+                    break;
+                }
+            }
+            const previousScrollLeft = viewport.scrollLeft;
             container.style.transform = "";
             container.style.zoom = String(factor);
-            const wrapper = document.getElementById("viewport-wrapper");
-            if (wrapper) {
-                wrapper.style.minWidth = (factor > 1.0 ? (factor * 100) + "%" : "100%");
-            }
-            // CSS zoom changed the layout height; keep the reader anchored at the same
-            // relative offset instead of jumping to the top of the document.
-            if (scroller && previousHeight > 0) {
-                const nextHeight = Math.max(1, scroller.scrollHeight);
-                scroller.scrollTop = Math.min(Math.max(0, previousTop * nextHeight / previousHeight), Math.max(0, nextHeight - 1));
-            }
+            // CSS zoom participates in layout, so the horizontal scroll range updates
+            // naturally. Do not multiply the wrapper width by the zoom a second time.
+            requestAnimationFrame(function () {
+                viewport.scrollLeft = previousScrollLeft;
+                if (anchorPage && anchorPage.isConnected) {
+                    const nextOffset = anchorPage.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+                    const pageDelta = nextOffset - anchorOffset;
+                    const documentScroller = document.scrollingElement || document.documentElement || document.body;
+                    if (documentScroller && Math.abs(pageDelta) > 0.5) {
+                        documentScroller.scrollTop += pageDelta;
+                    }
+                }
+            });
         }
 
         function setZoom(factor) {
@@ -459,7 +489,21 @@
 
         function renderDocument(arrayBuffer) {
             const container = document.getElementById("output");
-            container.innerHTML = "";
+            if (!container) return;
+            // Render off-screen while the page-shaped skeleton remains visible. The
+            // previous implementation cleared #output before renderAsync finished,
+            // causing a blank reader during large DOCX parsing.
+            const staging = document.createElement("div");
+            staging.style.position = "absolute";
+            staging.style.left = "-100000px";
+            staging.style.top = "0";
+            staging.style.visibility = "hidden";
+            staging.style.pointerEvents = "none";
+            staging.style.width = "max-content";
+            staging.style.minWidth = "100%";
+            staging.setAttribute("aria-hidden", "true");
+            container.appendChild(staging);
+
             const options = {
                 className: "docx",
                 inWrapper: true,
@@ -473,22 +517,21 @@
                 debug: false
             };
 
-            docx.renderAsync(arrayBuffer, container, null, options).then(function() {
-                const pages = container.querySelectorAll('.docx');
+            docx.renderAsync(arrayBuffer, staging, null, options).then(function() {
+                const pages = staging.querySelectorAll('.docx');
                 const totalPages = pages.length > 0 ? pages.length : 1;
-                // Loop 10: always reapply the authoritative zoom after a render.
-                // setZoom is idempotent at 1.0, and re-applying unconditionally closes
-                // the race where a zoom command that arrived during rendering was
-                // followed by a render pass that reset the visual size to 100%.
+                const renderedNodes = Array.from(staging.childNodes);
+                container.replaceChildren(...renderedNodes);
+                // Reapply zoom only after the rendered pages are attached to the live
+                // viewport; this ensures the CSS layout and horizontal range are real.
                 setZoom(currentZoom);
-                if (document.body.classList.contains('dark')) {
-                    setDarkMode(true);
-                }
+                if (document.body.classList.contains('dark')) setDarkMode(true);
                 observePages();
                 if (window.Android && window.Android.onDocumentLoaded) {
                     window.Android.onDocumentLoaded(totalPages);
                 }
             }).catch(function(err) {
+                staging.remove();
                 console.error("renderAsync error:", err);
                 container.innerHTML = '<div class="error-banner"><strong>DOCX Preview Notice:</strong> Could not render formatted layout (' + (err ? err.toString() : 'Unknown error') + ').</div>';
                 if (window.Android && window.Android.onDocumentError) {

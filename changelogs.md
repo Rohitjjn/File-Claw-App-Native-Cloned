@@ -340,3 +340,19 @@ All upcoming pulls or changes MUST map to this template:
 **Update Log**
 - 2026-06-15: v1.0 - Initial document creation.
 - 2026-06-16: v1.1 - Added changelog listings for v1.0.1 hotfix and rendering optimizations.
+
+
+### [v1.3.1] - 2026-10-16
+**[FIXED]**
+- **Affected:** `app/src/main/assets/editor/docx_editor.html`
+- **Description:** Adjusted the DOCX page viewport so horizontal scrolling is owned by the preview viewport and zoom is not double-counted through wrapper width. Zoom commits now preserve the nearest visible page position instead of proportionally jumping through the document. Rendering is staged off-screen while the existing page skeleton remains visible, then swapped into the current viewer; no native viewer chrome or unrelated formats were redesigned.
+- **Author:** GPT-6-assisted repository change
+- **Verification:** Source diff reviewed; Android build, JS runtime and real-device zoom checks remain pending.
+
+
+### [v10.0.7] - 2026-10-17
+**[FIXED]**
+- **Affected:** PDF viewer tray and page navigation in `FilePreviewScreen.kt`.
+- **Description:** The tray rotation action now switches the host screen between portrait and landscape instead of rotating PDF page content. Restored a compact draggable right-edge page-number handle based on the supplied reference image. Removed four tracked `.bak` editor backup files from source directories.
+- **Author:** GPT-6-assisted repository change
+- **Verification:** Source edits committed; Gradle/CI/device verification pending.

@@ -96,3 +96,38 @@ Stage Summary:
 - Changed/new/deleted files (14): AndroidManifest.xml (M), assets/editor/docx_editor.html (M), assets/pdfjs/search.html (M), ui/screens/DocumentPreviewSupport.kt (M), ui/screens/FilePreviewScreen.kt (M), core/format/PdfRotationPolicy.kt (new), test/.../PdfRotationPolicyTest.kt (new), test/.../DocxTextRecoveryTest.kt (new), core/format/PdfDarkModePolicy.kt (deleted), test/.../PdfDarkModePolicyTest.kt (deleted), changelogs.md, known-issues.md, docs/TODO.md, docs/prompts/NEXT_LOOP_PROMPT.md, worklog.md (+ PATCH_NOTES_LOOP14.md in the delivery ZIP).
 - Key decisions: `/assets/` registration (documented pattern) instead of a custom `/editor/` handler; rotation as pure viewer state in the loaded document (never a reload); configChanges as the lifecycle root-cause fix; scrubber navigation on release only (no eager renders); dark-mode policy deleted rather than dead-coded; DocxZoomPolicy untouched (DOCX zoom cap stays 5x — the 8x scope is PDF-only).
 - Unresolved risks (honest): Kotlin compile/tests/APK pending GitHub Actions; device behaviors pending (Loop 14 watchlist in known-issues.md): rotate feel on slow devices, scrubber over gesture nav on tall screens, configChanges breadth (theme/locale/split-screen) needs a regression sweep, 8x memory probe on low-tier devices. The DOCX fix is deterministic (main-frame 404 removed) but must be confirmed with a real device DOCX open.
+
+
+---
+
+Task ID: DOCX-ZOOM-VIEWPORT-2026-10-16
+Agent: GPT-6 technical lead; source change applied via GitHub repository integration (no parallel agent runtime available in this session)
+Date: 2026-10-16
+Baseline: `main` at `47e3347cc93b184a1353cddb034f8515036b052a`; new branch `feature/docx-preview-zoom-reliability-2026-10-16`.
+
+Task: Restore reliable DOCX preview zoom and keep the existing File Claw native preview UI. DOCX remains offline, preview-only; no editing engine, cloud renderer, remote asset or dependency was added.
+
+Observed source facts:
+- `docx_editor.html` applied CSS `zoom` to `#output`, but also multiplied `#viewport-wrapper`'s minimum width by the zoom factor while the output itself was width:100%. This couples two layout widths and can cause clipping/alignment and incorrect horizontal scroll geometry on phones.
+- `commitZoom()` preserved a ratio of global scrollTop to total scrollHeight. Because CSS zoom changes layout height, this can move the reading position to unrelated content.
+- `renderDocument()` cleared the live output before `docx.renderAsync()` completed, hiding the existing skeleton and leaving an empty viewport during large document rendering.
+
+Changes made on branch:
+- Changed the existing web preview viewport to own horizontal scrolling, use a stable width contract, and avoid double-applying zoom to the wrapper width.
+- Changed zoom commit anchoring to preserve the nearest visible page's viewport offset and horizontal scroll position.
+- Rendered into a hidden staging element while the existing skeleton stays visible; swaps rendered nodes into the same output only after successful rendering, and retains an error path on failure.
+- Kept the existing native Compose toolbar/controls and bundled offline `docx-preview` renderer. No new dependency was added.
+
+Verification status (honest):
+- PASS: source targets and baseline inspected; branch created from the recorded main SHA; GitHub contents update returned commit `cd17b59a407f3b3578bd90067be06db213366115`.
+- NOT RUN: local clone/build/test/JS syntax check. The shell clone attempt failed because this environment could not resolve github.com; therefore no Gradle or Node result is claimed.
+- NOT RUN: CI, APK installation and real-device gestures. Must verify fit-width/default 40%, toolbar zoom, slider, pinch in/out, horizontal scroll at 150–500%, anchor stability, search/next-prev after zoom, skeleton on a large DOCX, and failure recovery before merge.
+
+Residual risk: WebView Chromium CSS zoom and scroll anchoring need runtime verification on Android; the staging render temporarily duplicates rendered DOM memory during the swap window. If the device test exposes memory pressure, measure before changing the renderer or adding dependencies.
+
+
+## Follow-up: PDF edge page handle, orientation action and repository cleanup — 2026-10-17
+- Restored a compact, right-edge draggable page-number tab inspired by the supplied screenshot. It displays the current page and commits a page jump on drag release through the existing navigation callback.
+- Rewired the existing PDF tray rotation icon to request portrait/landscape screen orientation from the host Activity; it no longer changes the PDF page's rotation state.
+- Removed four tracked Kotlin `.bak` files from app source/theme folders. They were editor backups, not source inputs; canonical Kotlin files remain unchanged.
+- Verification: GitHub source updates committed. Android compile/tests, CI and device orientation/gesture checks are NOT RUN in this environment.
