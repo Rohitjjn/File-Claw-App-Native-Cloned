@@ -356,3 +356,10 @@ All upcoming pulls or changes MUST map to this template:
 - **Description:** The tray rotation action now switches the host screen between portrait and landscape instead of rotating PDF page content. Restored a compact draggable right-edge page-number handle based on the supplied reference image. Removed four tracked `.bak` editor backup files from source directories.
 - **Author:** GPT-6-assisted repository change
 - **Verification:** Source edits committed; Gradle/CI/device verification pending.
+
+
+### [v10.0.8] - 2026-10-17
+**[CHANGED]**
+- **Affected:** PDF right-edge page handle, PDF tray orientation action, DOCX preview zoom.
+- **Description:** Kept the page handle within the draggable track; changed the orientation action to sensor-landscape/portrait requests without explicitly reloading the PDF WebView; replaced DOCX CSS zoom commits with transform-based scaling and explicit scroll extent reservation. Existing preview screen and tray remain intact.
+- **Verification:** Source-level edits only. Automated build/tests and device checks pending. The DOCX rendering engine remains the existing bundled `docx-preview`; a different engine has not yet been adopted.
