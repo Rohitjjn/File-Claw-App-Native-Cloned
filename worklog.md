@@ -124,3 +124,10 @@ Verification status (honest):
 - NOT RUN: CI, APK installation and real-device gestures. Must verify fit-width/default 40%, toolbar zoom, slider, pinch in/out, horizontal scroll at 150–500%, anchor stability, search/next-prev after zoom, skeleton on a large DOCX, and failure recovery before merge.
 
 Residual risk: WebView Chromium CSS zoom and scroll anchoring need runtime verification on Android; the staging render temporarily duplicates rendered DOM memory during the swap window. If the device test exposes memory pressure, measure before changing the renderer or adding dependencies.
+
+
+## Follow-up: PDF edge page handle, orientation action and repository cleanup — 2026-10-17
+- Restored a compact, right-edge draggable page-number tab inspired by the supplied screenshot. It displays the current page and commits a page jump on drag release through the existing navigation callback.
+- Rewired the existing PDF tray rotation icon to request portrait/landscape screen orientation from the host Activity; it no longer changes the PDF page's rotation state.
+- Removed four tracked Kotlin `.bak` files from app source/theme folders. They were editor backups, not source inputs; canonical Kotlin files remain unchanged.
+- Verification: GitHub source updates committed. Android compile/tests, CI and device orientation/gesture checks are NOT RUN in this environment.
