@@ -112,3 +112,12 @@ Priorities: **P0** data loss / crash / security · **P1** high-impact feature or
 - [ ] Device-test the right-edge page-number handle for touch reachability, drag accuracy, page jump, and system navigation gesture conflicts.
 - [ ] Verify the tray orientation button switches portrait/landscape and that returning to the app/document preserves PDF page, search, password session and tray UI.
 - [ ] Run JavaScript/Kotlin checks, unit tests, debug APK build and CI before merge.
+
+
+## Viewer reimplementation acceptance — 2026-10-17
+- [ ] Compare the right-edge scrubber against a working device/reference; the reference repo's current main does not contain a custom scrubber to copy verbatim.
+- [ ] Test the page handle at first, middle and last page; drag must map linearly and thumb must remain inside track.
+- [ ] Test orientation button on devices supporting both landscape sides; confirm PDF page/search/password state survives without a full WebView/document reload.
+- [ ] Verify transform-only DOCX zoom at 25%, 40%, 100%, 200%, 500%; confirm vertical/horizontal scroll extents, fit sizing, pinch, search highlights and page tracking.
+- [ ] Validate a genuinely different offline DOCX rendering engine against complex sample documents before replacing `docx-preview`; preserve page breaks, tables, images, headers/footers, search and current native tray.
+- [ ] Run JS syntax checks, Kotlin compile/tests, debug APK build and CI for the branch head; device test before merge.
