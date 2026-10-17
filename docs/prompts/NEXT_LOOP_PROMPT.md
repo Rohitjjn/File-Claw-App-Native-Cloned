@@ -20,7 +20,7 @@
 
 - [ ] **DOCX real rendering**: formatted pages (boundaries, margins, spacing), tables/images/lists render, 100+ page file, find bar counts + next/prev, pinch/±/percent/double-tap zoom, horizontal scroll >100%, malformed DOCX → honest recovery banner + working Retry.
 - [ ] **PDF toolbar order**: Page indicator · Rotate · Search · Print · Share — exactly this.
-- [ ] **Rotate**: 90/180/270/0 on a middle page — no page-1 reset, no blank flash, no password re-prompt (password PDF!), search/highlights follow, zoom preserved, scrubber stays synchronized.
+- [ ] **Rotate**: device portrait to landscape after landscape use approximate sensor for left landscape orintition or right landscape oriantation no page-1 reset, no blank flash, no password re-prompt (password PDF!), search/highlights follow, zoom preserved, scrubber stays synchronized.
 - [ ] **Scrubber**: first→last→first drag on a 500+ page PDF; bubble `n / total` tracks; release jumps; memory flat during drag; visible with gesture navigation.
 - [ ] **Always-light PDF**: PDF under Android dark mode stays light end-to-end (viewer, status bar canvas, pages); DOCX/TXT/MD dark modes still work.
 - [ ] **8x zoom**: text sharp at max pinch, horizontal+vertical pan, `dumpsys meminfo` bounded, no blank pages on poster/blueprint pages.
