@@ -106,3 +106,9 @@ Priorities: **P0** data loss / crash / security · **P1** high-impact feature or
 - [ ] Verify pinch gestures, toolbar controls, percentage slider, search highlighting/navigation and page tracking remain synchronized after zoom.
 - [ ] Verify the page skeleton remains visible while a large DOCX renders, and renderer failures still show the existing recovery UI.
 - [ ] Run JS syntax check, unit tests, Kotlin compile, debug APK build and CI for the exact branch head; install APK and perform the real-device checklist before merge.
+
+
+## PDF reader follow-up — 2026-10-17
+- [ ] Device-test the right-edge page-number handle for touch reachability, drag accuracy, page jump, and system navigation gesture conflicts.
+- [ ] Verify the tray orientation button switches portrait/landscape and that returning to the app/document preserves PDF page, search, password session and tray UI.
+- [ ] Run JavaScript/Kotlin checks, unit tests, debug APK build and CI before merge.
